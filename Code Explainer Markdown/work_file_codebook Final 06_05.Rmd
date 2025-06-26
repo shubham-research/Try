@@ -1,0 +1,3364 @@
+---
+title: 'A Comprehensive Analysis of the Household Consumption Expenditure Survey:
+  Codebook'
+date: "`r Sys.Date()`"
+output:
+  html_notebook:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+  df_print: paged
+  theme: journal
+  code_folding: hide
+  html_document:
+    toc: true
+    toc_depth: '3'
+    df_print: paged
+---
+
+Introduction
+==========
+
+There are a lot of steps that have to be articulated clearly in a comprehensive approach to statistical analysis so that it could meaningfully inform policy and practice, everything from the initial treatment of data to the inferential conclusions at the end of the workflow. This rigorous approach for data analysis and interpretation via programming in R is outlined in this paper, focusing on the change found in consumption patterns by households across India as revealed from the Household Consumption Expenditure Surveys (HCES) of 2022-2023 and (NSS 68th Round) 2011-2012.
+
+In our case, we have used the HCES and NSS datasets to estimate the changes in household consumption expenditure trends, types of foods consumed and their quantities, micronutrient intake from these food items and dietary diversity. Finally, we have constructed a model that studies the relationship between the prevalence of anaemia and iron intake and dietary diversity amongst the general population. All of this is detailed in the paper “Changes in India’s Food Consumption and Policy Implications: A Comprehensive Analysis of Household Consumption Expenditure Survey 2022-23 and 2011-12” by Mudit Kapoor et al. Statistical analysis at its core involves much more than simply applying techniques; it follows quite an interactive and contemplative procedure involving data preparation, exploratory analysis, model fitting, model validation, and interpretation of findings. It is, in particular usefully relevant, in dealing with complex and real-world datasets such as the HCES that hold vast potential records of socio-economic, geographic, and nutrition information.
+
+
+This is how we propose our workflow: 
+
+*	Data preparation and cleaning: for example, structuring raw survey data into analysable formats in addition to standardizing units of analysis (such household-to-adult-female-equivalent counts) and diagnosis of entry omissions or inconsistencies.
+
+*	Exploratory data analysis (EDA): such as verification to establish any significant underlying distributions, potential relationships, key determinants, and variables inducing dietary typologies.
+
+*	Model specification and fitting: Bracket advanced approaches to statistical modelling; random effects multilevel as an example-that amply covers the hierarchical and nested data in per-household design.
+
+*	Validation and diagnostics: Using model-checking techniques along with simulation-based diagnostics and cross-validation in determining model performance, accuracy, and reliability.
+
+*	Interpretation and Communication of Results: Ends up being transparent in documenting the entire process-from R code execution to interpretation of statistical outcomes, an effort furthering transparency, reproducibility, and openness.
+
+As matters stand, a very compelling argument can be made in favour of laying out this analysis workflow as follows:
+
+*	Analytical steps ought to be documented clearly for validation and replication purposes since computational accuracy and reproducibility require these.
+
+*	Hierarchical structure and different varieties of data are contained in such complex datasets as HCES, which benefit immensely from a clearly expressed methodological pathway.
+
+*	Having transparent decisions in data processing and statistical modelling creates an ethos of trust among the stakeholders that include policymakers, researchers, and practitioners.
+
+Thus, this document is intended to give the reader not only the idea of how to employ statistical methodologies using R programming but also some knowledge about the whole process of statistical reasoning. By putting the whole analytical workflow on the books with R scripts, all data preparations, and methodology notes publicly on GitHub, we encourage open scientific practices, facilitating peer review, collaboration and continuous improvement in data-driven policy analysis.
+
+Chapter 1: Data Preparation
+==========
+
+1.1 Household Consumption Expenditure Survey 2023-24
+==========
+
+Household Consumption Expenditure Survey (HCES), conducted by National Sample Survey Office (NSSO) under the Ministry of Statistics and Programme Implementation (MoSPI) of the Government of India, aims to collect data on consumption patterns of goods and services by households. This survey makes essential contributions in understanding changes in consumption and expenditure behaviors.
+
+HCES 2023-24 unit level data is published as text documents. In this section, we will extract relevant variables, compute monthly per capita consumption expenditure (MPCE), and compute household size based on Adult Female Equivalent.
+
+
+Loading Packages
+-----------------
+
+We use p_load function of pacman package management tool in R. This function combines  functionalities of both the install.packages and library functions. Specifically, p_load checks whether the desired packages are already installed; if they are not, it automatically installs them.
+
+```{r, results='hide', message=FALSE}
+pacman::p_load(
+  tidyverse,    # data wrangling
+  readstata13,  # read.dta13() & save.dta13() for Stata .dta I/O
+  survey,       # complex survey functions: svyby(), svymean()
+  srvyr,        # survey design
+  tidybayes,    # theme_tidybayes() for Bayesian‐style ggplot themes
+  expss         # apply_labels() for variable/column labeling
+)
+
+```
+
+
+Specifying Options
+-----------------
+
+We set two global options to handle subsequent computations:
+
+1) In survey sometimes a primary sampling unit (PSU) may appear alone in a particular stratum; this can complicate the calculation of standard errors and variance. hence we adjust these lonely primary sampling units by survey.lonely.psu = "adjust" argument.
+
+2) Option scipen = 999 disables scientific notation and forces numbers to be shown in fixed notation.
+
+```{r}
+options(survey.lonely.psu = "adjust")
+options(scipen = 999)
+```
+
+Setting Working Directory
+-----------------
+
+We set project export directory as working directory for NSS68 data exports.
+
+```{r}
+setwd("Path To Working Directory")
+```
+
+
+Loading the Data from the TXT file
+-----------------
+The Primary dataset is loaded from a text file using a delimited input function. Key variables are subsequently extracted based on specific byte positions. In this process, several modifications are performed: the variable originally designated as "fsu_serial number" is renamed to "psu", and "stratum" is renamed to "strata". Furthermore, the weights are computed by normalizing the values of the "multiplier" variable through division by 100.
+
+
+```{r}
+
+hh_level01 <- read.delim("File Path to hces24_lvl_01.txt", header = FALSE)
+
+hh_level01 <- hh_level01 %>%
+  mutate(
+    hhid = str_sub(V1, 1, 38),
+    survey_name = str_sub(V1, 1, 4),
+    year = str_sub(V1, 5, 8),
+    fsu_serial_no = str_sub(V1, 9, 13),
+    sector = str_sub(V1, 14, 14),
+    state_code = str_sub(V1, 15, 16),
+    state_region = str_sub(V1, 17, 19),
+    district = str_sub(V1, 20, 21),
+    stratum = str_sub(V1, 22, 23),
+    sub_stratum = str_sub(V1, 24, 25),
+    panel = str_sub(V1, 26, 27),
+    sub_sample = str_sub(V1, 28, 28),
+    fod_sub_region = str_sub(V1, 29, 32),
+    sample_su_no = str_sub(V1, 33, 34),
+    sample_sub_division_no = str_sub(V1, 35, 35),
+    second_stage_stratum_no = str_sub(V1, 36, 36),
+    sample_hhld_no = str_sub(V1, 37, 38),
+    questionnaire_no = str_sub(V1, 39, 39),
+    level = str_sub(V1, 40, 41),
+    survey_code = str_sub(V1, 42, 42),
+    reason_for_substitution_code = str_sub(V1, 43, 43),
+    multiplier = str_sub(V1, 44, 58)
+  ) %>%
+  dplyr::select(-V1) %>%
+  mutate(
+    psu = fsu_serial_no,
+    strata = stratum,
+    weights = (as.numeric(multiplier))/100
+      )
+
+save(
+  hh_level01, 
+  file = "HCES2023_lvl_01.RData"
+  )
+
+```
+
+Data Creation of Family Structure
+-----------------
+
+We read the Level 2 person‑level dataset, compute total household size and counts by relationship, then classify nuclear families.
+
+
+```{r}
+
+hh_level02 <- read.delim("File Path to hces24_lvl_02.txt", header = FALSE)
+
+hh_level02 <- hh_level02 %>%
+  mutate(
+    hhid = str_sub(V1, 1, 38),
+    questionnaire = str_sub(V1, 39, 39),
+    level = str_sub(V1, 40, 41),
+    person_sno = str_sub(V1, 42, 43),
+    relation = str_sub(V1, 44, 44),
+    gender = str_sub(V1, 45, 45),
+    age = as.numeric(str_sub(V1, 46, 48)),
+    marital_status = str_sub(V1, 49, 49),
+    edu_code = str_sub(V1, 50, 51),
+    edu_years = str_sub(V1, 52, 53),
+    internet_used = str_sub(V1, 54, 54),
+    days_stayed_away = str_sub(V1, 55, 56),
+    meals_taken = str_sub(V1, 57, 57),
+    meals_taken_30_school = str_sub(V1, 58, 59),
+    meals_taken_30_employer = str_sub(V1, 60, 61),
+    meals_taken_30_others = str_sub(V1, 62, 63),
+    meals_taken_30_payment = str_sub(V1, 64, 65),
+    meals_taken_30_home = str_sub(V1, 66, 67),
+    status_revisit = str_sub(V1, 68, 68),
+    fdq_original_member = str_sub(V1, 69, 69),
+    multiplier = str_sub(V1, 70, 84),
+    hcq_with_fdq = str_sub(V1, 55, 67)
+  ) %>%
+  dplyr::select(-V1) %>%
+  mutate(hcq_with_fdq = str_trim(hcq_with_fdq))
+
+save(
+  hh_level02, 
+  file = "HCES2023_lvl_02.RData"
+  )
+```
+
+```{r}
+
+HCES2023_person_demographics <- hh_level02
+
+save(
+  HCES2023_person_demographics, 
+  file = "HCES2023_person_demographics.RData"
+)
+
+
+HCES2023_fam_structure <- HCES2023_person_demographics %>% dplyr::select(hhid, relation) %>%
+  mutate(n=1) %>%
+  group_by(hhid) %>%
+  mutate(hh_size = sum(n)) %>%
+  ungroup() %>%
+  group_by(hhid, hh_size, relation) %>%
+  summarise(
+    hh_size_relation = sum(n),
+    .groups = "drop"
+  ) %>%
+  group_by(hhid, hh_size) %>%
+  summarise(
+    family_structure = paste(relation, collapse = ","),
+    no_family_members = paste(hh_size_relation, collapse = ","),
+    .groups = "drop"
+  ) %>%
+  mutate(nuclear_family = ifelse(family_structure == "1,2,5", 1, 0)) ## 1 refers to head 2 is the spouse 5 unmarried children
+
+save(
+  HCES2023_fam_structure, 
+  file = "HCES2023_fam_structure.RData"
+)
+
+```
+
+
+Household Characteristics data
+-----------------
+The household characteristics dataset is similarly read from a text file. Variables are extracted in accordance with the pre-established byte positions and lengths.
+
+```{r}
+
+hh_level03 <- read.delim("File Path to hces24_lvl_03.txt", header = FALSE)
+
+hh_level03 <- hh_level03 %>%
+  mutate(
+    hhid = str_sub(V1, 1, 38),
+    questionnaire = str_sub(V1, 39, 39),
+    level = str_sub(V1, 40, 41),
+    fdq_hh_size = str_sub(V1, 42, 43),
+    hh_mem_eco = str_sub(V1, 44, 44),
+    nco_code = str_sub(V1, 45, 47),
+    nic_code = str_sub(V1, 48, 52),
+    broad_eco = str_sub(V1, 53, 53),
+    maj_self_emp = str_sub(V1, 54, 54),
+    maj_reg_wage_sal = str_sub(V1, 55, 55),
+    maj_casual = str_sub(V1, 56, 56),
+    hh_type = str_sub(V1, 57, 57),
+    religion = str_sub(V1, 58, 58),
+    social_group = str_sub(V1, 59, 59),
+    own_land = str_sub(V1, 60, 60),
+    type_own_land = str_sub(V1, 61, 61),
+    total_land_area = str_sub(V1, 62, 70),
+    own_dwelling = str_sub(V1, 71, 71),
+    type_dwelling = str_sub(V1, 72, 72),
+    cooking_code = str_sub(V1, 73, 74),
+    energy_code = str_sub(V1, 75, 75),
+    ration_card_code = str_sub(V1, 76, 76),
+    rent_locality = str_sub(V1, 77, 77),
+    pmgky = str_sub(V1, 78, 78),
+    multiplier = str_sub(V1, 79, 93)
+  ) %>%
+  dplyr::select(-V1)
+
+save(
+  hh_level03, 
+  file = "HCES2023_lvl_03.RData"
+  )
+
+```
+
+
+
+Derivation of Household Size Dataset
+-----------------
+
+The HCES 2022-23 survey utilizes a multiple questionnaires (FDQ, CSQ and DGQ) to gather comprehensive data on household consumption. For each questionnaire household information is recorded separately as these questionnaire canvassed at different points to the sample household. The Primary dataset is loaded from a text file using a delimited input function. 
+
+```{r}
+
+hh_level15 <- read.delim("File Path to hces24_lvl_15.TXT", header = FALSE)
+
+hh_level15 <- hh_level15 %>%
+  mutate(
+    hhid = str_sub(V1, 1, 38),
+    questionnaire = str_sub(V1, 39, 39),
+    visit = str_sub(V1, 40, 40),
+    level = str_sub(V1, 41, 42),
+    section = str_sub(V1, 43, 44),
+    time_canvass = str_sub(V1, 45, 47),
+    hh_consumption_exp = str_sub(V1, 48, 55),
+    total_exp_online_last30 = str_sub(V1, 56, 63),
+    informant_code = str_sub(V1, 64, 65),
+    response_code = str_sub(V1, 66, 66),
+    hh_size = str_sub(V1, 67, 69),
+    visit_month = str_sub(V1, 70, 75),
+    multiplier = str_sub(V1, 76, 90)
+  ) %>%
+  dplyr::select(-V1)
+
+save(
+  hh_level15,
+  file = "HCES2023_lvl_15.RData"
+)
+
+```
+
+Computation of MPCE
+-----------------
+This segment details construction of dataset that required for calculating the Monthly Per Capita Expenditure (MPCE). As with the previous sections, the variables are extracted according to their designated byte positions and lengths.
+
+
+
+```{r}
+
+
+hh_level14 <- read.delim("File Path to hces24_lvl_14.txt", header = FALSE)
+
+HCES2023_summary <- hh_level14 %>%
+  mutate(
+    hhid = str_sub(V1, 1, 38),
+    questionnaire = str_sub(V1, 39, 39),
+    level = str_sub(V1, 40, 41),
+    section = str_sub(V1, 42, 46),
+    item_code = str_sub(V1, 47, 49),
+    value = str_sub(V1, 50, 57),
+    multiplier = str_sub(V1, 58, 72)
+  ) %>%
+  dplyr::select(-V1)
+
+save(
+  HCES2023_summary, 
+  file = "HCES2023_summary.RData"
+  )
+
+save(
+  hh_level14, 
+  file = "HCES2023_lvl_14.RData"
+  )
+
+```
+
+
+Step 1: Compute Overall Expenditure Across the Three Surveys
+-----------------
+  
+In the next segment, the code calculates the 30-day equivalent expenditure (exp_30) for each consumption item by adjusting the reported expenditure based on its reference period and standardizing it to a monthly basis.The intermediate variables are then reshaped into a wide format, merged with household size data, and finally combined with hh_level1. This final dataset serves as the basis for calculating Monthly Per Capita Expenditure (MPCE).
+
+
+The monthly expenditure for a consumption item is calculated as:
+
+$$
+\text{exp_30} = \left( \frac{\text{value}}{\text{ref_period}} \right) \times 30
+$$
+```{r}
+item_code <- data.frame(
+  read.dta13(
+    "File Path to item_code_ref_period.dta"
+  )
+)
+```
+
+```{r}
+expenditure <- HCES2023_summary %>%
+  mutate(
+    survey = ifelse(questionnaire == "F", "fdq", "")
+  ) %>%
+  mutate(
+    survey = ifelse(questionnaire == "C", "csq", survey)
+  ) %>%
+  mutate(
+    survey = ifelse(questionnaire == "D", "dgq", survey)
+  ) %>%
+  dplyr::select(-questionnaire) %>%
+  left_join(item_code) %>%
+  mutate(exp_30 = (as.numeric(value)/ref_period)*30) %>%
+  group_by(hhid, multiplier, survey) %>%
+  summarise(
+    exp_30 = sum(exp_30),
+    .groups = "drop"
+  ) %>%
+  dplyr::select(hhid, survey, multiplier, exp_30) %>%
+  gather(variable, value, multiplier:exp_30) %>%
+  unite(temp, survey, variable) %>%
+  mutate(value = as.numeric(value)) %>%
+  spread(temp, value) %>%
+  left_join(
+    hh_level01 %>% 
+      dplyr::select(hhid, panel, state_code, state_region, district, sector, psu, strata, weights)
+  ) %>%
+  left_join(
+    hh_level03 %>% dplyr::select(hhid, fdq_hh_size)
+  )
+
+```
+
+
+
+Following the Ministry of Statistics and Programme Implementation (MOSPI) Survey on Household Consumption Expenditure 2022‑23, we exclude item code 539 (house rent or imputed garage rent) from our analysis of MPCE.
+
+```{r}
+
+item <- data.frame(item_code %>%
+                     filter(item_code != "539")) ## This allows to exclude the item 539
+
+```
+
+We then included expenditure on Food and Non food items excluding the item 539
+
+```{r}
+
+exp_food_non_food <- HCES2023_summary %>%
+  mutate(
+    survey = ifelse(questionnaire == "F", "fdq", "")
+  ) %>%
+  mutate(
+    survey = ifelse(questionnaire == "C", "csq", survey)
+  ) %>%
+  mutate(
+    survey = ifelse(questionnaire == "D", "dgq", survey)
+  ) %>%
+  dplyr::select(-questionnaire) %>%
+  left_join(item_code) %>%
+  filter(item_code != "539") %>% ## We exclude imputed rent from survey
+  mutate(exp_30 = (as.numeric(value)/ref_period)*30) %>%
+  group_by(hhid, broad_category) %>%
+  summarise(
+    exp_30 = sum(exp_30)
+  ) %>%
+  ungroup() %>%
+  spread(broad_category, exp_30) 
+
+expenditure <- expenditure %>% left_join(exp_food_non_food) 
+
+expenditure <- expenditure %>%
+  mutate(fdq_hh_size = as.integer(fdq_hh_size)) %>%
+  mutate(total_hh_exp_30 = food + `non food`) %>%
+  mutate(mpce_food_30 = (food/fdq_hh_size)) %>%
+  mutate(mpce_nonfood_30 = (`non food`/fdq_hh_size)) %>%
+  mutate(mpce = mpce_food_30 + mpce_nonfood_30)
+
+expenditure_1 <- expenditure %>% dplyr::select(hhid, fdq_hh_size, csq_exp_30, dgq_exp_30,fdq_exp_30, mpce_food_30, mpce_nonfood_30, mpce) %>%
+  filter(!is.na(mpce))
+
+expenditure_1[is.na(expenditure_1)] <- 0
+
+expenditure_2 <- HCES2023_summary %>%
+  mutate(
+    survey = ifelse(questionnaire == "F", "fdq", "")
+  ) %>%
+  mutate(
+    survey = ifelse(questionnaire == "C", "csq", survey)
+  ) %>%
+  mutate(
+    survey = ifelse(questionnaire == "D", "dgq", survey)
+  ) %>%
+  dplyr::select(-questionnaire) %>%
+  left_join(item_code) %>%
+  mutate(exp_30 = (as.numeric(value)/ref_period)*30) %>%
+  group_by(hhid, broad_category_f) %>%
+  summarise(
+    exp_30 = sum(exp_30),
+    .groups = "drop"
+  ) %>%
+  spread(broad_category_f, exp_30) %>%
+  left_join(
+    expenditure %>% dplyr::select(hhid, mpce)
+  ) %>%
+  filter(!is.na(mpce))
+
+expenditure_2[is.na(expenditure_2)] <- 0
+
+expenditure <- expenditure %>% left_join(expenditure_2)
+
+```
+
+Finally, we include household characteristics information obtained from level 3 into our dataset by merging the expenditure data with additional household-level details. The code performs a left join with the hh_level3 dataset—ensuring the household size is correctly formatted—and assigns constant values for the survey date, month, round, and sub-round. It also creates new variables (such as hh_size and weights) by mapping existing ones like fdq_hh_size and fdq_multiplier.
+
+```{r}
+
+HCES2023_HH_char <- hh_level01 %>%
+  dplyr::select(hhid, state_code, state_region, district, panel, sector, psu, strata, weights) %>%
+  mutate(panel = trimws(panel)) %>%
+  left_join(
+    hh_level03 %>% 
+      dplyr::select(hhid, fdq_hh_size, hh_type:pmgky) %>%
+      rename(
+        lighting_code = energy_code,
+        dwelling_unit_code = type_dwelling
+      ) %>%
+      mutate(fdq_hh_size = as.integer(fdq_hh_size)) 
+  ) %>%
+  left_join(
+    hh_level15 %>% 
+      dplyr::select(hhid, questionnaire, visit, visit_month) %>%
+      mutate(
+        visit = ifelse(questionnaire == "H", "4", visit)
+      ) %>%
+      pivot_wider(names_from  = questionnaire, values_from = c(visit_month, visit)) %>%
+      dplyr::select(hhid, visit_month_F, visit_F) %>%
+      mutate(month = str_sub(visit_month_F, 1, 2)) %>%
+      mutate(date_of_survey = paste0("01", visit_month_F)) %>%
+      dplyr::select(hhid, visit_F, date_of_survey, month) ## Visit_F is the visit in which food survey is conducted, date_of_survey refers to Date when food survey was done
+  ) %>%
+  mutate(
+    round = "HCES 2023-24",
+    sub_round = "99"
+  ) %>%
+  left_join(
+    expenditure %>% dplyr::select(hhid, csq_exp_30, Consumables, dgq_exp_30, Durables,fdq_exp_30, Food, `imputed rent`, mpce_food_30, mpce_nonfood_30, mpce)
+  ) 
+
+save(
+  HCES2023_HH_char, 
+  file = "HCES2023_HH_char.RData"
+)
+
+
+```
+
+
+HH size based on AFE
+--------------
+
+Household size based on Adult Female Equivalents (AFE) refines a simple headcount by weighting each member according to their energy or nutritional needs relative to an adult female. 
+
+We extract person-level details from the hh_level2 dataset. An indicator for children under 2 is created to capture their specific nutritional needs, and further we calculate an individual’s energy requirement using a series of conditional statements based on age and gender. A reference energy requirements for each category from NIN Report and then standardize these energy requirements into an equivalent measure relative to an adult female. Further we aggregate these values at the household level, summing the AFE values to derive the total household size based on adult female requirements.
+
+```{r}
+
+adult_female_requirement <- 2130 # From NIN
+
+HCES2023_AFE <- hh_level02 %>%
+  dplyr::select(hhid, person_sno, gender, age) %>%
+  group_by(hhid) %>%
+  mutate(
+    under_2 = ifelse(age <= 2, 1, 0)
+  ) %>%
+  ungroup() %>%
+  group_by(hhid) %>%
+  mutate(
+    under_2 = max(under_2)
+  ) %>%
+  ungroup() %>%
+  dplyr::select(hhid, person_sno, gender, age, under_2) %>%
+  mutate(
+    energy_requirement = dplyr::case_when(
+      age < 1  ~ 0,
+      age < 4  ~ 1070,
+      age < 7  ~ 1360,
+      age < 10 ~ 1700,
+      age < 13 ~ ifelse(gender == "1" | gender == "3", 2220, 2060),
+      age < 16 ~ ifelse(gender == "1" | gender == "3", 2860, 2400),
+      age < 18 ~ ifelse(gender == "1" | gender == "3", 2860, 2400),
+      age >= 18 & (gender == "1" | gender == "3") ~ 2710,
+      (age >= 18 & age < 50) & gender == "2" & under_2 == 1 ~ 2690,  # Pregnant woman & Lactating mother (0-6 months). We are assuming the highest energy requiremtn for this group
+      age >= 18 & gender == "2" ~ 2130  # Adult female (non-pregnant, non-lactating)
+    )
+  ) %>%
+  mutate(
+    afe = round(energy_requirement/adult_female_requirement, 2)
+  ) %>%
+  mutate(n = 1) %>%
+  group_by(hhid) %>%
+  summarise(
+    hh_size_afe = sum(afe),
+    hh_size_survey = sum(n),
+    .groups = "drop"
+  ) 
+
+save(
+  HCES2023_AFE,
+  file = "HCES2023_AFE.RData"
+)
+```
+
+
+1.2 Household Consumption Expenditure Survey 2022-23
+==========
+
+Household Consumption Expenditure (HCES), conducted by National Sample Survey Office (NSSO) under the Ministry of Statistics and Programme Implementation (MoSPI) of the Government of India. HCES aims to collect data on consumption patterns of goods and services by households. This survey makes essential contributions in understanding changes in consumption and expenditure behaviours. 
+
+HCES 2022-23 unit level data released on 7th June 2024 were published as text documents. In this section we will extract relevant variable, compute monthly per capita consumption expenditure (MPCE) and compute HH Size based of Adult Female Equivalent.
+
+Loading Packages
+-----------------
+
+We use p_load function of pacman package management tool in R. This function combines  functionalities of both the install.packages and library functions. Specifically, p_load checks whether the desired packages are already installed; if they are not, it automatically installs them.
+
+```{r, results='hide', message=FALSE}
+pacman::p_load(
+  tidyverse,    # data wrangling
+  readstata13,  # read.dta13() & save.dta13() for Stata .dta I/O
+  survey,       # complex survey functions: svyby(), svymean()
+  srvyr,        # survey design
+  tidybayes,    # theme_tidybayes() for Bayesian‐style ggplot themes
+  expss         # apply_labels() for variable/column labeling
+)
+
+```
+
+Specifying Options
+-----------------
+
+We set two global options to handle subsequent computations:
+
+1) In survey sometimes a primary sampling unit (PSU) may appear alone in a particular stratum; this can complicate the calculation of standard errors and variance. hence we adjust these lonely primary sampling units by survey.lonely.psu = "adjust" argument.
+
+2) Option scipen = 999 disables scientific notation and forces numbers to be shown in fixed notation.
+
+```{r}
+options(survey.lonely.psu = "adjust")
+options(scipen = 999)
+```
+
+Setting Working Directory and Loading State, Region & Item Codes
+-----------------
+
+We create combined state_region data frame being identifier for State and NSS Region Codes. In order to generate item_codes with respective identifier and reference period information. We import the Stata file using the options generate.factors = TRUE and nonint.factors = TRUE.
+
+The option generate.factors = TRUE instructs the import function to create factor labels from numeric values in cases where no labels are provided in the Stata file. Similarly, the nonint.factors = TRUE option ensures that any non-integer values intended to represent factor labels are appropriately converted into factors. 
+
+```{r}
+setwd("Path To Working Directory")
+
+state_code <- read.dta13("File Path to state_nss_code_new.dta")
+
+state_region <- read.dta13("File Path to nss_region_HCES2022.dta")
+
+state_region <- state_region %>% 
+  distinct(state_region, nss_region, state_code) %>%
+  left_join(state_code %>% dplyr::select(state_code, state, state_abb))
+
+state_region <- data.frame(state_region)
+
+item_code <- read.dta13("File Path to item_code_ref_period.dta", generate.factors = TRUE, nonint.factors = TRUE)
+
+```
+
+Loading the Data from the TXT file
+-----------------
+The Primary dataset is loaded from a text file using a delimited input function. Key variables are subsequently extracted based on specific byte positions. In this process, several modifications are performed: the variable originally designated as "fsu_serial number" is renamed to "psu", and "stratum" is renamed to "strata". Furthermore, the weights are computed by normalizing the values of the "multiplier" variable through division by 100.
+
+
+```{r}
+hh_level1 <- read.delim("File Path to hces22_lvl_01.TXT", header = FALSE)
+
+hh_level1 <- hh_level1 %>%
+  mutate(
+    hhid = str_sub(V1, 1, 38),
+    survey_name = str_sub(V1, 1, 4),
+    year = str_sub(V1, 5, 8),
+    fsu_serial_no = str_sub(V1, 9, 13),
+    sector = str_sub(V1, 14, 14),
+    state_code = str_sub(V1, 15, 16),
+    state_region = str_sub(V1, 17, 19),
+    district = str_sub(V1, 20, 21),
+    stratum = str_sub(V1, 22, 23),
+    sub_stratum = str_sub(V1, 24, 25),
+    panel = str_sub(V1, 26, 27),
+    sub_sample = str_sub(V1, 28, 28),
+    fod_sub_region = str_sub(V1, 29, 32),
+    sample_su_no = str_sub(V1, 33, 34),
+    sample_sub_division_no = str_sub(V1, 35, 35),
+    second_stage_stratum_no = str_sub(V1, 36, 36),
+    sample_hhld_no = str_sub(V1, 37, 38),
+    questionnaire_no = str_sub(V1, 39, 39),
+    level = str_sub(V1, 40, 41),
+    survey_code = str_sub(V1, 42, 42),
+    reason_for_substitution_code = str_sub(V1, 43, 43),
+    multiplier = str_sub(V1, 44, 58)
+  ) %>%
+  dplyr::select(-V1) %>%
+  mutate(
+    psu = fsu_serial_no,
+    strata = stratum,
+    weights = (as.numeric(multiplier))/100
+      )
+
+save.dta13(hh_level1, "HCES2022_blk1.dta")
+
+```
+
+Household Characteristics data
+-----------------
+The household characteristics dataset is similarly read from a text file. Variables are extracted in accordance with the pre-established byte positions and lengths.
+
+```{r}
+hh_level3 <- read.delim("File Path to hces22_lvl_03.TXT", header = FALSE)
+
+hh_level3 <- hh_level3 %>%
+  mutate(
+    hhid = str_sub(V1, 1, 38),
+    questionnaire = str_sub(V1, 39, 39),
+    level = str_sub(V1, 40, 41),
+    fdq_hh_size = str_sub(V1, 42, 43),
+    hh_mem_eco = str_sub(V1, 44, 44),
+    nco_code = str_sub(V1, 45, 47),
+    nic_code = str_sub(V1, 48, 52),
+    broad_eco = str_sub(V1, 53, 53),
+    maj_self_emp = str_sub(V1, 54, 54),
+    maj_reg_wage_sal = str_sub(V1, 55, 55),
+    maj_casual = str_sub(V1, 56, 56),
+    hh_type = str_sub(V1, 57, 57),
+    religion = str_sub(V1, 58, 58),
+    social_group = str_sub(V1, 59, 59),
+    own_land = str_sub(V1, 60, 60),
+    type_own_land = str_sub(V1, 61, 61),
+    total_land_area = str_sub(V1, 62, 70),
+    own_dwelling = str_sub(V1, 71, 71),
+    type_dwelling = str_sub(V1, 72, 72),
+    basic_building_wall = str_sub(V1, 73, 73),
+    basic_building_roof = str_sub(V1, 74, 74),
+    basic_building_roof = str_sub(V1, 75, 75),
+    cooking_code = str_sub(V1, 76, 77),
+    energy_code = str_sub(V1, 78, 78),
+    drinking_water_code = str_sub(V1, 79, 80),
+    time_taken_source_water = str_sub(V1, 81, 83),
+    laterine_code = str_sub(V1, 84, 84),
+    laterine_type = str_sub(V1, 85, 86),
+    ration_card_code = str_sub(V1, 87, 87),
+    rent_locality = str_sub(V1, 88, 88),
+    pmgky = str_sub(V1, 89, 89),
+    death_past5_0_to_18 = str_sub(V1, 90, 90),
+    no_death_past5_0_to_18 = str_sub(V1, 91, 92),
+    multiplier = str_sub(V1, 93, 107)
+  ) %>%
+  dplyr::select(-V1)
+
+save.dta13(hh_level3, "HCES2022_level3.dta")
+
+```
+
+
+Derivation of Household Size Data 
+-----------------
+
+The HCES 2022-23 survey utilizes a multiple questionnaires (FDQ, CSQ and DGQ) to gather comprehensive data on household consumption. For each questionnaire household information is recorded separately as these questionnaire canvassed at different points to the sample household. The Primary dataset is loaded from a text file using a delimited input function. Key variables are subsequently extracted based on specific byte positions.In this process we make several modifications as well such as reshaping the data and labeling the questionnaire code.
+
+```{r}
+
+
+hh_level15 <- read.delim("File Path to hces22_lvl_15.TXT", header = FALSE)
+
+hh_level15 <- hh_level15 %>%
+  mutate(
+    hhid = str_sub(V1, 1, 38),
+    questionnaire = str_sub(V1, 39, 39),
+    level = str_sub(V1, 40, 41),
+    section = str_sub(V1, 42, 43),
+    time_canvass = str_sub(V1, 44, 46),
+    hh_consumption_exp = str_sub(V1, 47, 54),
+    total_exp_online_last30 = str_sub(V1, 55, 62),
+    informant_code = str_sub(V1, 63, 64),
+    response_code = str_sub(V1, 65, 65),
+    hh_size = str_sub(V1, 66, 68),
+    multiplier = str_sub(V1, 69, 83)
+  ) %>%
+  dplyr::select(-V1)
+
+qtr <- data.frame(
+  questionnaire  = c("F", "C", "D"),
+  questionnaire1 = c("fdq", "csq", "dgq")
+)
+
+hh_size <- hh_level15 %>% filter(questionnaire != "H") %>% distinct(hhid, questionnaire, hh_size) %>%
+  mutate(hh_size = as.integer(hh_size)) %>% left_join(qtr) %>%
+  mutate(questionnaire = paste0(questionnaire1, "_hh_size")) %>% dplyr::select(-questionnaire1) %>%
+  spread(questionnaire, hh_size) 
+
+```
+
+Computation of MPCE
+-----------------
+This segment details construction of dataset that required for calculating the Monthly Per Capita Expenditure (MPCE). As with the previous sections, the variables are extracted according to their designated byte positions and lengths.
+
+```{r}
+
+hh_level14 <- read.delim("File Path to hces22_lvl_14.TXT", header = FALSE)
+
+HCES2022_summary <- hh_level14 %>%
+  mutate(
+    hhid = str_sub(V1, 1, 38),
+    questionnaire = str_sub(V1, 39, 39),
+    level = str_sub(V1, 40, 41),
+    section = str_sub(V1, 42, 46),
+    item_code = str_sub(V1, 47, 49),
+    value = str_sub(V1, 50, 59),
+    multiplier = str_sub(V1, 60, 74)
+  ) %>%
+  dplyr::select(-V1)
+
+save(
+  HCES2022_summary, 
+  file = "HCES2022_summary.RData"
+  )
+
+```
+
+In the next segment, the code calculates the 30-day equivalent expenditure (exp_30) for each consumption item by adjusting the reported expenditure based on its reference period and standardizing it to a monthly basis.The intermediate variables are then reshaped into a wide format, merged with household size data, and finally combined with hh_level1. This final dataset serves as the basis for calculating Monthly Per Capita Expenditure (MPCE).
+
+
+The monthly expenditure for a consumption item is calculated as:
+
+$$
+\text{exp_30} = \left( \frac{\text{value}}{\text{ref_period}} \right) \times 30
+$$
+
+```{r}
+
+expenditure <- HCES2022_summary %>%
+  mutate(
+    survey = ifelse(questionnaire == "F", "fdq", "")
+  ) %>%
+  mutate(
+    survey = ifelse(questionnaire == "C", "csq", survey)
+  ) %>%
+  mutate(
+    survey = ifelse(questionnaire == "D", "dgq", survey)
+  ) %>%
+  dplyr::select(-questionnaire) %>%
+  left_join(item_code) %>%
+  mutate(exp_30 = (as.numeric(value)/ref_period)*30) %>%
+  group_by(hhid, multiplier, survey) %>%
+  summarise(
+    exp_30 = sum(exp_30)
+  ) %>%
+  ungroup() %>%
+  dplyr::select(hhid, survey, multiplier, exp_30) %>%
+  gather(variable, value, multiplier:exp_30) %>%
+  unite(temp, survey, variable) %>%
+  mutate(value = as.numeric(value)) %>%
+  spread(temp, value) %>%
+  left_join(
+    hh_size
+  ) %>%
+  left_join(
+    hh_level1 %>% 
+      dplyr::select(hhid, panel, state_code, state_region, district, sector, psu, strata, weights)
+  )
+
+```
+
+Following the Ministry of Statistics and Programme Implementation (MOSPI) Survey on Household Consumption Expenditure 2022‑23, we exclude item code 539 (house rent or imputed garage rent) from our analysis of MPCE.
+
+```{r}
+
+item <- data.frame(item_code %>%
+  filter(item_code != "539")) ## This allows to exclude the item 539
+
+exp_food_non_food <- HCES2022_summary %>%
+  mutate(
+    survey = ifelse(questionnaire == "F", "fdq", "")
+  ) %>%
+  mutate(
+    survey = ifelse(questionnaire == "C", "csq", survey)
+  ) %>%
+  mutate(
+    survey = ifelse(questionnaire == "D", "dgq", survey)
+  ) %>%
+  dplyr::select(-questionnaire) %>%
+  left_join(item_code) %>%
+  filter(item_code != "539") %>% ## We exclude imputed rent from survey
+  mutate(exp_30 = (as.numeric(value)/ref_period)*30) %>%
+  group_by(hhid, broad_category) %>%
+  summarise(
+    exp_30 = sum(exp_30)
+  ) %>%
+  ungroup() %>%
+  spread(broad_category, exp_30) 
+
+expenditure <- expenditure %>% left_join(exp_food_non_food) 
+
+expenditure <- expenditure %>%
+  mutate(total_hh_exp_30 = food + `non food`) %>%
+  mutate(mpce_food_30 = (food/fdq_hh_size)) %>%
+  mutate(mpce_nonfood_30 = (`non food`/fdq_hh_size)) %>%
+  mutate(mpce = mpce_food_30 + mpce_nonfood_30)
+
+```
+
+Finally, we include household characteristics information obtained from level 3 into our dataset by merging the expenditure data with additional household-level details. The code performs a left join with the hh_level3 dataset—ensuring the household size is correctly formatted—and assigns constant values for the survey date, month, round, and sub-round. It also creates new variables (such as hh_size and weights) by mapping existing ones like fdq_hh_size and fdq_multiplier.
+
+```{r}
+
+HCES2022_HH_char <- expenditure %>%
+  left_join(
+    hh_level3 %>% mutate(fdq_hh_size = as.integer(fdq_hh_size))
+  ) %>%
+  mutate(
+    date_of_survey = "313131",
+    month = "13",
+    round = "HCES 2022-23",
+    sub_round = "99"
+  ) %>%
+  mutate(
+    hh_size = fdq_hh_size,
+    weights = fdq_multiplier
+  )
+
+```
+
+Further we perform renaming (e.g., energy_code to lighting_code and type_dwelling to dwelling_unit_code) and select operations for relevent variables.
+
+```{r}
+HCES2022_HH_char_final <- HCES2022_HH_char %>%
+  rename(
+    lighting_code = energy_code,
+    dwelling_unit_code = type_dwelling
+  ) %>%
+  dplyr::select(
+    hhid,
+    date_of_survey,
+    month,
+    panel,
+    round, 
+    sub_round,
+    state_code,
+    state_region,
+    district,
+    sector,
+    hh_size,
+    hh_type,
+    religion,
+    social_group,
+    cooking_code,
+    lighting_code,
+    dwelling_unit_code,
+    mpce_food_30,
+    mpce_nonfood_30,
+    mpce,
+    psu,
+    strata,
+    weights
+)
+
+save.dta13(HCES2022_HH_char_final, "HCES2022_HH_char.dta")
+
+```
+
+Data Creation of Family Structure
+-----------------
+
+We read the Level 2 person‑level dataset, compute total household size and counts by relationship, then classify nuclear families.
+
+
+```{r}
+
+hh_level2 <- read.delim("File Path to hces22_lvl_02.TXT", header = FALSE)
+
+hh_level2 <- hh_level2 %>%
+  mutate(
+    hhid = str_sub(V1, 1, 38),
+    questionnaire = str_sub(V1, 39, 39),
+    level = str_sub(V1, 40, 41),
+    person_sno = str_sub(V1, 42, 43),
+    relation = str_sub(V1, 44, 44),
+    gender = str_sub(V1, 45, 45),
+    age = as.numeric(str_sub(V1, 46, 48)),
+    marital_status = str_sub(V1, 49, 49),
+    edu_code = str_sub(V1, 50, 51),
+    edu_years = str_sub(V1, 52, 53),
+    internet_used = str_sub(V1, 54, 54),
+    days_stayed_away = str_sub(V1, 55, 56),
+    meals_taken = str_sub(V1, 57, 57),
+    meals_taken_30_school = str_sub(V1, 58, 59),
+    meals_taken_30_employer = str_sub(V1, 60, 61),
+    meals_taken_30_others = str_sub(V1, 62, 63),
+    meals_taken_30_payment = str_sub(V1, 64, 65),
+    meals_taken_30_home = str_sub(V1, 66, 67),
+    status_revisit = str_sub(V1, 68, 68),
+    fdq_original_member = str_sub(V1, 69, 69),
+    multiplier = str_sub(V1, 70, 84),
+    hcq_with_fdq = str_sub(V1, 55, 67)
+  ) %>%
+  dplyr::select(-V1) %>%
+  mutate(hcq_with_fdq = str_trim(hcq_with_fdq))
+
+save.dta13(hh_level2, "HCES2022_person_demographics.dta")
+
+```
+
+HH size based on AFE
+--------------
+
+Household size based on Adult Female Equivalents (AFE) refines a simple headcount by weighting each member according to their energy or nutritional needs relative to an adult female. 
+
+We extract person-level details from the hh_level2 dataset. An indicator for children under 2 is created to capture their specific nutritional needs, and further we calculate an individual’s energy requirement using a series of conditional statements based on age and gender. A reference energy requirements for each category from NIN Report and then standardize these energy requirements into an equivalent measure relative to an adult female. Further we aggregate these values at the household level, summing the AFE values to derive the total household size based on adult female requirements.
+
+```{r}
+
+adult_female_requirement <- 2130 # From NIN
+
+HCES2022_AFE <- hh_level2 %>%
+  dplyr::select(hhid, person_sno, gender, age) %>%
+  group_by(hhid) %>%
+  mutate(
+    under_2 = ifelse(age <= 2, 1, 0)
+  ) %>%
+  ungroup() %>%
+  group_by(hhid) %>%
+  mutate(
+    under_2 = max(under_2)
+  ) %>%
+  ungroup() %>%
+  dplyr::select(hhid, person_sno, gender, age, under_2) %>%
+  mutate(
+    energy_requirement = dplyr::case_when(
+      age < 1  ~ 0,
+      age < 4  ~ 1070,
+      age < 7  ~ 1360,
+      age < 10 ~ 1700,
+      age < 13 ~ ifelse(gender == "1" | gender == "3", 2220, 2060),
+      age < 16 ~ ifelse(gender == "1" | gender == "3", 2860, 2400),
+      age < 18 ~ ifelse(gender == "1" | gender == "3", 2860, 2400),
+      age >= 18 & (gender == "1" | gender == "3") ~ 2710,
+      (age >= 18 & age < 50) & (gender == "2" & under_2 == 1) ~ 2690,  # Pregnant woman & Lactating mother (0-6 months). We are assuming the highest energy requirement for this group
+      age >= 18 & gender == "2" ~ 2130  # Adult female (non-pregnant, non-lactating)
+    )
+  ) %>%
+  mutate(
+    afe = round(energy_requirement/adult_female_requirement, 2)
+  ) %>%
+  mutate(n = 1) %>%
+  group_by(hhid) %>%
+  summarise(
+    hh_size_afe = sum(afe),
+    hh_size_survey = sum(n),
+    .groups = "drop"
+  ) 
+
+
+save.dta13(
+  HCES2022_AFE,
+  "HCES2022_AFE.dta"
+)
+```
+
+
+
+1.3 NSS 2011-12
+==========
+
+The 68th round of the National Sample Survey (NSS 2011-12) conducted by the Ministry of Statistics and Programme Implementation (MoSPI) collects data on household consumption and socio‑demographic characteristics.
+
+
+Loading Packages
+-----------------
+
+We use p_load function of pacman package management tool in R. This function combines  functionalities of both the install.packages and library functions. Specifically, p_load checks whether the desired packages are already installed; if they are not, it automatically installs them.
+
+```{r, results='hide', message=FALSE}
+pacman::p_load(
+  tidyverse,    # data wrangling
+  readstata13,  # read.dta13() & save.dta13() for Stata .dta I/O
+  survey,       # complex survey functions: svyby(), svymean()
+  srvyr,        # survey design
+  tidybayes,    # theme_tidybayes() for Bayesian‐style ggplot themes
+  expss         # apply_labels() for variable/column labeling
+)
+```
+
+
+Specifying Options
+-----------------
+
+We set two global options to handle subsequent computations:
+
+1) In survey sometimes a primary sampling unit (PSU) may appear alone in a particular stratum; this can complicate the calculation of standard errors and variance. hence we adjust these lonely primary sampling units by survey.lonely.psu = "adjust" argument.
+
+2) Option scipen = 999 disables scientific notation and forces numbers to be shown in fixed notation.
+
+```{r}
+options(survey.lonely.psu = "adjust")
+options(scipen = 999)
+```
+
+Setting Working Directory
+-----------------
+
+We set project export directory as working directory for NSS68 data exports.
+
+```{r}
+setwd("Path To Working Directory")
+```
+
+Data Creation of Family Structure
+-----------------
+
+We read the Level 2 person‑level dataset, compute total household size and counts by relationship, then classify nuclear families.
+
+```{r}
+hh_level2 <- read.dta13("File Path to NSS68_type2_level2_person.dta")
+
+NSS68_fam_structure <- hh_level2 %>%
+  select(hhid, relation) %>%
+  mutate(n = 1) %>%
+  group_by(hhid) %>%
+  mutate(hh_size = sum(n)) %>%
+  ungroup() %>%
+  group_by(hhid, relation) %>%
+  mutate(hh_size_r = sum(n)) %>%
+  ungroup() %>%
+  distinct(hhid, hh_size, hh_size_r, relation) %>%
+  arrange(hhid, relation) %>%
+  group_by(hhid, hh_size) %>%
+  mutate(
+    relation_structure = paste0(relation, collapse = ","),
+    hh_size_relation   = paste0(hh_size_r, collapse = ",")
+  ) %>%
+  ungroup() %>%
+  distinct(hhid, hh_size, hh_size_relation, relation_structure) %>%
+  rename(hh_size_level2 = hh_size) %>%
+  mutate(
+    nuclear = ifelse(relation_structure == "1,2,5", 1, 0)
+  )
+
+save.dta13(NSS68_fam_structure, "NSS68_fam_structure.dta")
+```
+
+HH size based on AFE
+--------------
+
+Household size based on Adult Female Equivalents (AFE) refines a simple headcount by weighting each member according to their energy or nutritional needs relative to an adult female. 
+
+We extract person-level details from the hh_level2 dataset. An indicator for children under 2 is created to capture their specific nutritional needs, and further we calculate an individual’s energy requirement using a series of conditional statements based on age and gender. A reference energy requirements for each category from NIN Report and then standardize these energy requirements into an equivalent measure relative to an adult female. Further we aggregate these values at the household level, summing the AFE values to derive the total household size based on adult female requirements.
+
+
+```{r}
+adult_female_requirement <- 2130  # kcal, from NIN
+
+NSS68_AFE <- hh_level2 %>%
+  select(hhid, person_srl_no_, sex, age) %>%
+  rename(gender = sex) %>%
+  group_by(hhid) %>%
+  mutate(
+    under_2 = ifelse(age <= 2, 1, 0)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    energy_requirement = case_when(
+      age < 1  ~ 0,
+      age < 4  ~ 1070,
+      age < 7  ~ 1360,
+      age < 10 ~ 1700,
+      age < 13 ~ ifelse(gender %in% c("1", "3"), 2220, 2060),
+      age < 16 ~ ifelse(gender %in% c("1", "3"), 2860, 2400),
+      age < 18 ~ ifelse(gender %in% c("1", "3"), 2860, 2400),
+      age >= 18 & gender %in% c("1", "3") ~ 2710,
+      age >= 18 & gender == "2" & under_2 == 1 ~ 2690,
+      age >= 18 & gender == "2" ~ 2130,
+      TRUE ~ NA_real_
+    ),
+    afe = round(energy_requirement / adult_female_requirement, 2),
+    n = 1
+  ) %>%
+  group_by(hhid) %>%
+  summarise(
+    hh_size_afe    = sum(afe, na.rm = TRUE),
+    hh_size_survey = sum(n)
+  ) %>%
+  ungroup()
+
+save.dta13(NSS68_AFE, "NSS68_type2_AFE.dta")
+```
+
+1.4 Data Creation Full Data (MPCE Cutoffs)
+==========
+
+In this section, we proceed with creating consumption classes by using the monthly per-capita expenditure (MPCE) cutoffs. We use full data of HCES 2022-23, HCES 2023-24 and NSS 68th round (2011-12) for our analysis.
+
+
+Loading Packages
+-----------------
+
+We use p_load function of pacman package management tool in R. This function combines  functionalities of both the install.packages and library functions. Specifically, p_load checks whether the desired packages are already installed; if they are not, it automatically installs them.
+
+```{r, results='hide', message=FALSE}
+pacman::p_load(
+  tidyverse,    # data wrangling
+  readstata13,  # read.dta13() & save.dta13() for Stata .dta I/O
+  dplyr         # easier data manipulation
+)
+```
+
+Setting Working Directory
+-----------------
+
+We set project export directory as working directory for Full Data of HCES 2022-23, HCES 2023-24 and NSS 68th round (2011-12).
+
+```{r}
+setwd("Path To Working Directory")
+```
+
+Specifying Options
+-----------------
+
+We set one global options to handle the subsequent computation: option scipen = 999 disables scientific notation and forces numbers to be shown in fixed notation.
+
+```{r}
+options(scipen = 999)
+```
+
+Data Loading and Preprocessing
+-----------------
+
+This section was responsible for importing and preprocessing household-level survey data from three distinct sources: HCES 2023, HCES 2022, and NSS 68. Each dataset was loaded and cleaned to ensure consistency across sources. Common variables were selected, and unnecessary objects were removed from the memory.
+
+1. HCES 2023
+
+Two RData files containing household characteristics and AFE (Age-Food-Expenditure) data were loaded. These datasets were merged using a left_join on the common household identifier and then trimmed to include only relevant columns. After merging, the original components were removed from the environment.
+
+```{r}
+load("File Path to HCES2023_HH_char.RData")
+load("File Path to HCES2023_AFE.RData")
+
+HCES2023 <- HCES2023_HH_char %>%
+  left_join(HCES2023_AFE) %>%
+  dplyr::select(hhid, cooking_code, religion, social_group, panel, month, visit_F, state_code, state_region, district, sector, fdq_hh_size, hh_size_afe, hh_type, psu, strata, weights, mpce)
+rm(HCES2023_HH_char, HCES2023_AFE)
+```
+
+2. HCES 2022
+
+Two Stata .dta files were read using read.dta13(), containing overall household characteristics and AFE data. A left_join operation was performed, and a selected subset of variables was retained for analysis.
+
+```{r}
+HCES2022 <- data.frame(
+  read.dta13(
+    "File Path to HCES2022_HH_char_overall.dta"
+    )
+  ) %>%
+  left_join(
+    read.dta13("File Path to HCES2022_AFE.dta")
+  ) %>%
+  dplyr::select(hhid, cooking_code, religion, social_group, panel, state_code, state_region, district, sector, fdq_hh_size, hh_size_afe, hh_type, psu, strata, weights, mpce)
+```
+
+3. NSS 68 (2011-12)
+
+The NSS 68 dataset was read in three parts: household block, characteristics, and AFE modules. Variable names were renamed to match HCES formats. The hh_type variable was cleaned to replace empty values with "0". Finally, MPCE values were scaled down by a factor of 100.
+
+```{r}
+NSS68 <- data.frame(
+  read.dta13("File Path to NSS68_type2_blk1.dta") %>%
+    rename(
+      psu = fsu_serial_no,
+      strata = stratum,
+      weights = combined_multiplier
+    ) %>%
+    left_join(
+      read.dta13(" File Path to NSS68_type2_HH_char.dta") %>%
+        dplyr::select(hhid, religion, social_group, cooking_code, month, mpce, hh_size, hh_type) %>%
+        mutate(hh_type = ifelse(hh_type == "", "0", hh_type))
+    )
+) %>%
+  left_join(
+    read.dta13(" File Path to NSS68_type2_AFE.dta")
+  ) %>%
+  dplyr::select(hhid, cooking_code, religion, social_group, month, state_code, state_region, district, sector, hh_size, hh_size_afe, hh_type, psu, strata, weights, mpce) %>%
+  mutate(mpce = mpce/100)
+```
+
+Consumption Class Generation
+-----------------
+
+A custom function class_data() was defined to classify households into MPCE-based decile consumption classes. These classes were computed separately for each dataset, both at the state-sector level and overall sector level using survey-weighted quantiles.
+
+1. Defining the function
+
+The function class_data() accepted a dataset name string as input. Internally, it selected the correct dataset, created a survey design object, and computed decile breakpoints using svyquantile() from the survey package. The households were then binned into decile classes using .bincode().
+
+```{r}
+# 1. Select dataset & compute per capita weights 
+class_data <- function(n) {
+  
+   if (n == "HCES2023") {
+    try <- HCES2023 %>% mutate(weights_pc = weights*fdq_hh_size) %>% rename(hh_size = fdq_hh_size) %>%
+      dplyr::select(hhid, sector, state_code, psu, strata, weights_pc, hh_size, mpce) 
+  } else if (n == "HCES2022") {
+    try <- HCES2022 %>% mutate(weights_pc = weights*fdq_hh_size) %>% rename(hh_size = fdq_hh_size) %>%
+      dplyr::select(hhid, sector, state_code, psu, strata, weights_pc, hh_size, mpce) 
+  } else if (n == "NSS68") {
+    try <- NSS68 %>% mutate(weights_pc = weights*hh_size) %>%
+      dplyr::select(hhid, sector, state_code, psu, strata, weights_pc, hh_size, mpce) 
+  }    
+  
+# 2. Create survey design object  
+  data_svy <- try[complete.cases(try),] %>%
+    as_survey_design(
+      ids = psu,
+      strata = strata,
+      weights = weights_pc
+    )   
+  
+# 3. Compute state-level & overall deciles using svyquantile  
+  state_cutoffs <- data.frame(svyby(~mpce, ~state_code+sector, data_svy, svyquantile, quantile = seq(0.1, 0.9, 0.1)))[,1:11]
+  
+  colnames(state_cutoffs) <- c("state_code", "sector", paste0("cat", seq(1,9,1)))
+  
+  state_cutoffs_l <- state_cutoffs %>%
+    gather(cat, value, cat1:cat9)
+  
+  overall_cutoffs <- data.frame(svyby(~mpce, ~sector, data_svy, svyquantile, quantile = seq(0.1, 0.9, 0.1)))[,1:10]
+  
+  colnames(overall_cutoffs) <- c("sector", paste0("cat", seq(1,9,1)))
+  
+  overall_cutoffs_l <- overall_cutoffs %>%
+    gather(cat, value, cat1:cat9)
+  
+  st <- unique(try$state_code)
+  ru <- unique(try$sector)
+  
+  cons_class <- data.frame()
+  
+# 4. Loop through each state-sector pair and classify households  
+  for (s in st) {
+    for(r in ru) {
+      
+      try1 <- try %>%
+        filter(state_code == s) %>%
+        filter(sector == r) %>%
+        mutate(
+          class_state = .bincode(mpce, breaks = c(0, state_cutoffs_l[state_cutoffs_l$state_code == s & state_cutoffs_l$sector == r,]$value, Inf))
+        ) %>%
+        mutate(
+          class_overall = .bincode(mpce, breaks = c(0, overall_cutoffs_l[overall_cutoffs_l$sector == r,]$value, Inf))
+        )
+      
+      cons_class <- rbind(cons_class, try1)
+    }
+  }
+  
+ # 5. Return classification variables (statewise & overall) 
+  return(
+    cons_class %>% dplyr::select(hhid, class_state, class_overall) %>% mutate(nss = n)
+  )
+  
+}
+```
+
+2. Application to All Datasets
+
+The class_data() function was applied to each dataset. The resulting decile classifications were appended to their respective dataframes.
+
+```{r}
+HCES2023 <- HCES2023 %>% left_join(class_data("HCES2023"))
+HCES2022 <- HCES2022 %>% left_join(class_data("HCES2022"))
+NSS68 <- NSS68 %>% left_join(class_data("NSS68"))
+```
+
+Saving Final Data Outputs
+-----------------
+
+The final data objects, now containing decile classifications, were saved as an .RData file named data_Main.RData for future use.
+
+```{r}
+save(
+  HCES2023,
+  HCES2022,
+  NSS68,
+  file = "data/data_Main.RData"
+)
+```
+
+
+1.5 Data Creation For Models 
+==========
+
+In this section, we create NSS 68 (2011-12) and HCES 2022 data that gets further used in the analysis and models.
+
+Loading Packages
+-----------------
+
+We use p_load function of pacman package management tool in R. This function combines  functionalities of both the install.packages and library functions. Specifically, p_load checks whether the desired packages are already installed; if they are not, it automatically installs them.
+
+```{r}
+pacman::p_load(tidyverse,   # data wrangling
+               tidybayes,   # Bayesian analysis streamlining within tidy workflow
+               readstata13, # read.dta13() & save.dta13() for Stata .dta I/O
+               survey,      # complex survey data analysis
+               srvyr,       # survey data summary statistics calculation
+               tidytext,    # text analysis in tidy workflow
+               data.table,  # enhanced version of data.frame
+               ggtext,      # improves text rendering in plots
+               scales,      # transforming and normalising data
+               ggsci,       # high-quality colour pallete collection 
+               sandwich,    # compute robust covariance matrix estimators
+               parallel,    # parallel computation
+               mgcv         # estimating penalized Generalized Linear models including Additive and Additive Mixed Models
+               )
+```
+
+Specifying Options
+-----------------
+
+We set two global options to handle subsequent computations:
+
+1) In survey sometimes a primary sampling unit (PSU) may appear alone in a particular stratum; this can complicate the calculation of standard errors and variance. hence we adjust these lonely primary sampling units by survey.lonely.psu = "adjust" argument.
+
+2) mc.cores = parallel::detectCores() argument was used to enable multi-core processing.
+
+```{r}
+options(survey.lonely.psu = "adjust")
+options(mc.cores = parallel::detectCores())
+```
+
+Specifying Working Directory
+-----------------
+
+We set project paper export directory as working directory.
+
+```{r}
+setwd(" Path to Working Directory")
+```
+
+Specifying Additional Operators
+-----------------
+
+A custom infix operator %notin% was defined to check if values do not exist in a vector or if the values of the first vector are not present in the second vector. A seed was also set for reproducibility.
+
+```{r}
+`%notin%` <- Negate(`%in%`)
+set.seed(1234)
+```
+
+PSU Grouping Function Definition
+-----------------
+
+A function data_psu() was defined to identify and regroup small PSUs (Primary Sampling Units) within strata. PSUs with fewer observations than a specified threshold were merged into artificial grouped PSUs for robust statistical analysis. 
+
+The function followed five major steps:
+ - Counted observations per PSU.
+ - Identified PSUs below threshold.
+ - Created artificial groupings within strata.
+ - Generated unique PSU identifiers.
+ - Merged these back to the dataset.
+
+```{r}
+data_psu <- function(data_n, n_psu) {
+  
+  # Define the minimum threshold for observations in a PSU
+  n_psu <- n_psu  # Minimum size of a PSU
+  
+  data <- data_n %>%
+    distinct(hhid, state_code, sector, strata, psu) %>%
+    arrange(state_code, sector, strata, psu)
+  
+  # Step 1: Count the number of observations in each PSU
+  psu_counts <- data %>%
+    group_by(state_code, sector, strata, psu) %>%
+    summarize(sample_count = n(), .groups = "drop")
+  
+  # Step 2: Identify small PSUs (with fewer than `n_psu` observations)
+  small_psus <- psu_counts %>%
+    filter(sample_count < n_psu)
+  
+  # Step 3: Combine small PSUs within each strata into larger groups
+  combined_psu <- small_psus %>%
+    group_by(state_code, sector, strata) %>%
+    arrange(sample_count) %>%
+    mutate(
+      cumulative_count = cumsum(sample_count),  # Cumulative sum of observations
+      group_id = cumsum(cumulative_count > n_psu)  # New PSU group ID
+    ) %>%
+    ungroup() %>%
+    mutate(
+      group_id = ifelse(group_id == 0, 1, group_id),  # Handle edge cases
+      new_psu = paste0("state_", state_code, "_sector_", sector, "_strata", "_group_", group_id)  # New PSU label
+    )
+  
+  # Step 4: Map the new PSU groups back to the original data
+  data <- data %>%
+    left_join(combined_psu %>% dplyr::select(psu, new_psu, state_code, sector, strata), by = c("psu", "state_code", "sector", "strata")) %>%
+    mutate(
+      psu_final = ifelse(is.na(new_psu), as.character(psu), new_psu)  # Use original PSU if not small
+    )
+  
+  return(data)
+  
+}
+```
+
+Data Loading and Setup
+-----------------
+
+Various components required for analysis were loaded, including:
+ - State codes (state_code).
+ - NSS regions (nss_region).
+ - Preprocessed survey data (data_Main.RData).
+ 
+```{r}
+# State code
+state_code <- data.frame(
+  read.dta13(
+    " File Path to state_nss_code_new.dta"
+  )
+)
+
+#NSS Region
+nss_region <- data.frame(
+  read.dta13(
+    " File Path to nss_region_NSS68.dta"
+  )
+)
+
+# Load the Relevant Data
+load(" File Path to data_Main.RData")
+```
+
+Construction of Panel and Class Labels
+-----------------
+
+Reference panels were created to control for seasonality and MPCE class rankings. These will help in aligning time trends and consumption strata across datasets.
+ 
+```{r}
+panel_NSS68_HCES2023 <- data.frame(
+  month = c(paste0("0", seq(1,9,1)), paste0(seq(10,12,1))),
+  panel_c = month.name[seq(1,12,1)],
+  panel_order = seq(1,12,1)
+) %>%
+  mutate(
+    seasonal = panel_c,
+    seasonal_order = panel_order
+  )
+
+panel_HCES2022 <- data.frame(
+  panel = paste0(seq(1,10,1)),
+  panel_c = c(
+    paste0("[", month.abb[8], ", ", month.abb[9], ", ", month.abb[10], "]"),
+    paste0("[", month.abb[9], ", ", month.abb[10], ", ", month.abb[11], "]"),
+    paste0("[", month.abb[10], ", ", month.abb[11], ", ", month.abb[12], "]"),
+    paste0("[", month.abb[11], ", ", month.abb[12], ", ", month.abb[1], "]"),
+    paste0("[", month.abb[12], ", ", month.abb[1], ", ", month.abb[2], "]"),
+    paste0("[", month.abb[1], ", ", month.abb[2], ", ", month.abb[3], "]"),
+    paste0("[", month.abb[2], ", ", month.abb[3], ", ", month.abb[4], "]"),
+    paste0("[", month.abb[3], ", ", month.abb[4], ", ", month.abb[5], "]"),
+    paste0("[", month.abb[4], ", ", month.abb[5], ", ", month.abb[6], "]"),
+    paste0("[", month.abb[5], ", ", month.abb[6], ", ", month.abb[7], "]")
+  ),
+  panel_order = c(6,7,8,9,10,1,2,3,4,5)
+) %>%
+  arrange(panel_order) %>%
+  mutate(
+    seasonal = panel_c,
+    seasonal_order = panel_order
+  )
+
+# Class category
+class_cat <- data.frame(
+  class_order = as.integer(seq(1,5,1)),
+  class = paste0("c", seq(1,5,1)),
+  class_c = c("Bottom 20%", "20-40%", "40-60%", "60-80%", "Top 20%")
+)
+
+```
+
+Dataset-Specific Regional and PSU Reclassification
+-----------------
+
+Administrative region and PSU identifiers were harmonised across datasets (HCES2023, HCES2022, NSS68). Examples include:
+ - Ladakh merged with Jammu & Kashmir.
+ - Telangana merged with Andhra Pradesh.
+ - Reassignment of NSS regions for certain UP       districts.
+ - Application of data_psu() to unify PSUs.
+ 
+```{r}
+# HCES2023
+HCES2023 <- HCES2023 %>%
+  mutate( ## To make the HCES comparable across the two surveys we recode ladakh region as J&K (bifurcated in 2019) and Telangana as AP (bifurcated in 2014)
+    state_code = ifelse(state_code == "37", "01", state_code)
+  ) %>%
+  mutate( ## There are districts in UP that were classified as Central region but they are Northern Ganga Canal
+    nss_region = dplyr::case_when(
+      state_code == "09" & district == "06" ~ "091", 
+      state_code == "09" & district == "07" ~ "091",
+      state_code == "09" & district == "08" ~ "091",
+      state_code == "09" & district == "09" ~ "091",
+      state_code == "09" & district == "10" ~ "091",
+      .default = state_region
+    )
+  ) %>%
+  relocate(nss_region, .after = state_region)
+
+HCES2023_psu <- data_psu(HCES2023, 50) %>% dplyr::select(hhid, psu_final)
+
+# HCES2022
+HCES2022 <- HCES2022 %>%
+  mutate( ## To make the HCES comparable across the two surveys we recode ladakh region as J&K (bifurcated in 2019) and Telangana as AP (bifurcated in 2014)
+    state_code = ifelse(state_code == "37", "01", state_code), 
+    state_code = ifelse(state_code == "36", "28", state_code)
+  ) %>%
+  mutate( ## There are districts in UP that were classified as Central region but they are Northern Ganga Canal
+    nss_region = dplyr::case_when(
+      state_code == "09" & district == "06" ~ "091", 
+      state_code == "09" & district == "07" ~ "091",
+      state_code == "09" & district == "08" ~ "091",
+      state_code == "09" & district == "09" ~ "091",
+      state_code == "09" & district == "10" ~ "091",
+      .default = state_region
+    )
+  ) %>%
+  relocate(nss_region, .after = state_region)
+
+HCES2022_psu <- data_psu(HCES2022, 50) %>% dplyr::select(hhid, psu_final)
+
+# NSS68
+NSS68 <- NSS68 %>%
+  mutate(
+    nss_region = dplyr::case_when(
+      state_region == "283" ~ "361", # This NSS region was reclassified post 2014
+      state_region == "284" ~ "362", # This NSS region was reclassified post 2014
+      state_region == "285" ~ "283", # This NSS region was reclassified post 2014
+      state_region == "014" ~ "371", # Ladakh region
+      state_region == "261" ~ "251", # Combined Dadra and Nagar with Daman and Diu
+      .default = state_region
+    )
+  ) %>%
+  relocate(nss_region, .after = state_region) %>%
+  mutate(
+    state_code = ifelse(state_code == "26", "25", state_code) ## In HCES Daman and Diu were combined with D & Nagar haveli
+  ) %>%
+  mutate(
+    state_code = dplyr::case_when(
+      nss_region == "361" | nss_region == "362" ~ "36",
+      .default = state_code
+    )
+  )
+
+NSS68_psu <- data_psu(NSS68, 50) %>% dplyr::select(hhid, psu_final)
+
+```
+
+Construction of Final Analytical Datasets
+-----------------
+
+Three final datasets were constructed: HCES2023_comp, HCES2022_comp, and NSS68_comp. For each dataset:
+ - Households with incomplete responses were        removed.
+ - Survey weights were normalised to create new     weight variables (w_pc, w).
+ - PSU reclassification was applied (psu_final).
+ - NSS regions and seasonal labels were             integrated.
+ - MPCE decile classes were categorised into five    groups (c1 to c5).
+ - Class metadata (class_cat) was merged in.
+
+```{r}
+HCES2023_comp <- HCES2023[complete.cases(HCES2023),] %>%
+  mutate(
+    w_pc = (weights*fdq_hh_size)/(mean(weights*fdq_hh_size))
+  ) %>%
+  mutate(
+    w = (weights)/(mean(weights))
+  ) %>%
+  relocate(
+    w_pc, .after = weights
+  ) %>%
+  relocate(
+    w, .after = weights
+  ) %>%
+  left_join(
+    HCES2023_psu
+  ) %>%
+  relocate(
+    psu_final, .after = psu
+  ) %>%
+  relocate(
+    nss_region, .after = state_region
+  ) %>%
+  left_join(
+    panel_NSS68_HCES2023 %>% dplyr::select(month, seasonal, seasonal_order)
+  ) %>%
+  relocate(seasonal, .after = month) %>%
+  relocate(seasonal_order, .after = seasonal) %>%
+  mutate(
+    class = dplyr::case_when(
+      class_state >= 1 & class_state <= 2  ~ "c1",
+      class_state >= 3 & class_state <= 4  ~ "c2",
+      class_state >= 5 & class_state <= 6  ~ "c3",
+      class_state >= 7 & class_state <= 8  ~ "c4",
+      class_state >= 9 & class_state <= 10 ~ "c5",
+      .default = ""
+    )
+  ) %>%
+  left_join(class_cat) %>%
+  relocate(class, .after = class_state) %>%
+  relocate(class_c, .after = class) %>%
+  relocate(class_order, .after = class_c)
+
+
+#
+HCES2022_comp <- HCES2022[complete.cases(HCES2022),] %>%
+  mutate(
+    w_pc = (weights*fdq_hh_size)/(mean(weights*fdq_hh_size))
+  ) %>%
+  mutate(
+    w = (weights)/(mean(weights))
+  ) %>%
+  relocate(
+    w_pc, .after = weights
+  ) %>%
+  relocate(
+    w, .after = weights
+  ) %>%
+  left_join(
+    HCES2022_psu
+  ) %>%
+  relocate(
+    psu_final, .after = psu
+  ) %>%
+  relocate(
+    nss_region, .after = state_region
+  ) %>%
+  mutate(panel = gsub("\\s+", " ", trimws(panel))) %>%
+  left_join(
+    panel_HCES2022 %>% dplyr::select(panel, seasonal, seasonal_order)
+  ) %>%
+  relocate(seasonal, .after = panel) %>%
+  relocate(seasonal_order, .after = seasonal) %>%
+  mutate(
+    class = dplyr::case_when(
+      class_state >= 1 & class_state <= 2  ~ "c1",
+      class_state >= 3 & class_state <= 4  ~ "c2",
+      class_state >= 5 & class_state <= 6  ~ "c3",
+      class_state >= 7 & class_state <= 8  ~ "c4",
+      class_state >= 9 & class_state <= 10 ~ "c5",
+      .default = ""
+    )
+  ) %>%
+  left_join(class_cat) %>%
+  relocate(class, .after = class_state) %>%
+  relocate(class_c, .after = class) %>%
+  relocate(class_order, .after = class_c)
+
+#
+NSS68_comp <- NSS68[complete.cases(NSS68),] %>%
+  mutate(
+    w_pc = (weights*hh_size)/(mean(weights*hh_size))
+  ) %>%
+  mutate(
+    w = (weights)/(mean(weights))
+  ) %>%
+  relocate(
+    w_pc, .after = weights
+  ) %>%
+  relocate(
+    w, .after = weights
+  ) %>%
+  left_join(
+    NSS68_psu
+  ) %>%
+  relocate(
+    psu_final, .after = psu
+  ) %>%
+  relocate(
+    nss_region, .after = state_region
+  ) %>%
+  left_join(
+    panel_NSS68_HCES2023 %>% dplyr::select(month, seasonal, seasonal_order)
+  ) %>%
+  relocate(seasonal, .after = month) %>%
+  relocate(seasonal_order, .after = seasonal) %>%
+  mutate(
+    class = dplyr::case_when(
+      class_state >= 1 & class_state <= 2  ~ "c1",
+      class_state >= 3 & class_state <= 4  ~ "c2",
+      class_state >= 5 & class_state <= 6  ~ "c3",
+      class_state >= 7 & class_state <= 8  ~ "c4",
+      class_state >= 9 & class_state <= 10 ~ "c5",
+      .default = ""
+    )
+  ) %>%
+  left_join(class_cat) %>%
+  relocate(class, .after = class_state) %>%
+  relocate(class_c, .after = class) %>%
+  relocate(class_order, .after = class_c) %>%
+  filter(month != "13")
+```
+
+Saving Processed Outputs
+-----------------
+
+The final datasets and code mappings were saved to an .RData file for model-ready analysis.
+
+```{r}
+save(
+  state_code,
+  nss_region,
+  HCES2023_comp,
+  HCES2022_comp,
+  NSS68_comp,
+  file = "full_model/data/data_for_models.RData"
+)
+```
+
+
+Chapter 2: Analysis of the Data to compute Proportions and Quantity
+==========
+
+2.1 Part I of the Analysis for creation of the BAM models
+==========
+
+We model household food consumption using a Bayesian Additive Model
+(BAM) implemented via the mgcv R package. In mgcv terminology, BAM is
+simply a generalized additive model (GAM) fitted to large data (Wood et
+al., 2015). In practice our BAM has two parts: a binomial (logit) model
+for the indicator of any consumption, and a Gamma (log‑link) model for
+the positive consumption amount.
+
+Loading Packages
+-----------------
+
+We use p_load function of pacman package management tool in R. This
+function combines functionalities of both the install.packages and
+library functions. Specifically, p_load checks whether the desired
+packages are already installed; if they are not, it automatically
+installs them.
+
+```{r, results='hide', message=FALSE}
+pacman::p_load(
+tidybayes, readstata13, survey, srvyr, tidytext, data.table, scales, ggsci, sandwich, parallel, mgcv, dplyr, tidyr
+)
+```
+
+Specifying Options
+-----------------
+
+We set two global options to handle subsequent computations:
+
+1)  In survey sometimes a primary sampling unit (PSU) may appear alone
+    in a particular stratum; this can complicate the calculation of
+    standard errors and variance. hence we adjust these lonely primary
+    sampling units by survey.lonely.psu = "adjust" argument.
+
+2)  Option scipen = 999 disables scientific notation and forces numbers
+    to be shown in fixed notation.
+
+```{r}
+options(survey.lonely.psu = "adjust")
+options(scipen = 999)
+```
+
+Setting Working Directory
+-----------------
+
+We set project export directory as working directory for BAM data
+exports.
+
+```{r}
+setwd("Path To Working Directory")
+```
+
+Setting up Computation Environment
+-----------------
+
+We enable parallel processing by setting the number of CPU cores to use
+through the mc.cores option, where the detectCores() function from the
+parallel package automatically identifies the maximum number of
+available cores on the system, allowing our computations to leverage
+full processing capacity. Additionally, we establish reproducibility by
+setting a fixed random seed (1234) with set.seed(), ensuring that any
+randomized processes in our analysis will produce identical results when
+the code is run multiple times or on different machines, which is
+essential for scientific reproducibility.
+
+```{r}
+options(mc.cores = parallel::detectCores())
+set.seed(1234) 
+```
+
+Load the Relevant Data
+-----------------
+
+```{r}
+load("File Path to data_for_models.RData")
+```
+
+Food Item Categories for Analysis
+-----------------
+
+We create a data frame (item_l) that defines the food categories for our
+consumption analysis. The data frame contains two columns: item, which
+stores concise code names used in our programming, and item_c, which
+provides the corresponding descriptive category labels for reporting and
+visualization.
+
+```{r}
+item_l <- data.frame(
+  item = c(
+    "beverages",
+    "fruits_fresh",
+    "milk",
+    "egg_fish_meat",
+    "vegetables",
+    "cereal",
+    "edible_oil",
+    "spices",
+    "salt_sugar",
+    "pulses",
+    "vegetables_wdout_pot_oni"
+  ),
+  item_c = c(
+    "Beverages",
+    "Fruits (fresh)",
+    "Milk & Milk products",
+    "Eggs, Fish & Meat",
+    "Vegetables",
+    "Cereals",
+    "Edible Oil",
+    "Spices",
+    "Salt & Sugar",
+    "Pulses",
+    "Vegetables wo Potatoes & Onions"
+  )
+) %>%
+  arrange(item)
+```
+
+Processing Food Consumption Quantity Data
+-----------------
+
+This section implements the food_quantity() function, which processes
+household food consumption data across three different survey years
+(HCES2023, HCES2022, and NSS68). For each survey, the function performs
+several key operations: it loads item reference period data, adds
+special vegetable categories (without potatoes and without
+potatoes/onions), merges quantity data with household characteristics,
+filters out households without cooking arrangements, transforms missing
+values to zeros, reshapes the data from wide to long format using
+gather(), calculates both per capita and adult female equivalent (AFE)
+consumption quantities, adjusts for reference periods to standardize to
+a 30-day basis, and returns the processed dataset. The function handles
+survey-specific data paths and coding differences, providing consistent
+output structure across all three surveys. After defining the function,
+we apply it to each survey year, creating three standardized datasets
+(HCES2023_food, HCES2022_food, and NSS68_food) that will be used in
+subsequent multilevel modeling analysis.
+
+```{r}
+
+food_quantity <- function(n) {
+  
+  if (n == "HCES2023") {
+    
+    HCES2023_item_ref <- data.frame(
+      read.dta13("File Path to item_code_ref_period.dta")
+    ) 
+    
+    HCES2023_item_ref <- HCES2023_item_ref %>%
+      rbind(
+        HCES2023_item_ref %>% filter(item == "vegetables") %>%
+          mutate(item = "vegetables_wdout_pot") %>%
+          mutate(item_code = paste0(item_code, "*"))
+      ) %>%
+      rbind(
+        HCES2023_item_ref %>% filter(item == "vegetables") %>%
+          mutate(item = "vegetables_wdout_pot_oni") %>%
+          mutate(item_code = paste0(item_code, "**"))
+      )
+    
+    # We need the quantity data to be appended to the dataset for this part of the analysis
+    
+    HCES2023_food <- data.frame(
+      HCES2023_comp %>%
+        left_join(
+          read.dta13("File Path to per_capita_quantity_food_items_HCES2023.dta")
+        )
+    ) %>%
+      filter(cooking_code != "12") # We exclude those households with no cooking arrangements
+    
+    HCES2023_food[is.na(HCES2023_food)] <- 0 # There are some households that have 0 of any food items consumption but have a cooking arrangement. These households consume processed food but do not seem to have cooked any food. We include them in the analysis by putting 0 for each of those items
+    
+    data <- HCES2023_food %>%
+      gather(item, quantity_pc, cereal:salt_sugar) %>%
+      filter(item %in% item_l$item) %>%
+      mutate(
+        quantity_afe = (quantity_pc * fdq_hh_size) / hh_size_afe
+      ) %>%
+      left_join(
+        HCES2023_item_ref %>% dplyr::select(item, ref_period)
+      ) %>%
+      mutate(
+        quantity_pc_per30day  = (quantity_pc / ref_period) * 30
+      ) %>%
+      mutate(
+        quantity_afe_per30day = (quantity_afe / ref_period) * 30
+      )
+    
+  } else if (n == "HCES2022") {
+    
+    HCES2022_item_ref <- data.frame(
+      read.dta13("File Path to item_code_ref_period.dta")
+    ) 
+    
+    HCES2022_item_ref <- HCES2022_item_ref %>%
+      rbind(
+        HCES2022_item_ref %>% filter(item == "vegetables") %>%
+          mutate(item = "vegetables_wdout_pot") %>%
+          mutate(item_code = paste0(item_code, "*"))
+      ) %>%
+      rbind(
+        HCES2022_item_ref %>% filter(item == "vegetables") %>%
+          mutate(item = "vegetables_wdout_pot_oni") %>%
+          mutate(item_code = paste0(item_code, "**"))
+      )
+    
+    # We need the quantity data to be appended to the dataset for this part of the analysis
+    
+    HCES2022_food <- data.frame(
+      HCES2022_comp %>%
+        left_join(
+          read.dta13("File Path to per_capita_quantity_food_items_HCES2022.dta")
+        )
+    ) %>%
+      filter(cooking_code != "12") # We exclude those households with no cooking arrangements
+    
+    HCES2022_food[is.na(HCES2022_food)] <- 0 # There are some households that have 0 of any food items consumption but have a cooking arrangement. These households consume processed food but do not seem to have cooked any food. We include them in the analysis by putting 0 for each of those items
+    
+    data <- HCES2022_food %>%
+      gather(item, quantity_pc, cereal:salt_sugar) %>%
+      filter(item %in% item_l$item) %>%
+      mutate(
+        quantity_afe = (quantity_pc * fdq_hh_size) / hh_size_afe
+      ) %>%
+      left_join(
+        HCES2022_item_ref %>% dplyr::select(item, ref_period)
+      ) %>%
+      mutate(
+        quantity_pc_per30day  = (quantity_pc / ref_period) * 30
+      ) %>%
+      mutate(
+        quantity_afe_per30day = (quantity_afe / ref_period) * 30
+      )
+    
+  } else if (n == "NSS68") {
+    
+    NSS68_item_ref <- data.frame(
+      read.dta13("File Path to item_code_ref_period.dta")
+    ) 
+    
+    NSS68_item_ref <- NSS68_item_ref %>%
+      rbind(
+        NSS68_item_ref %>% filter(item == "vegetables") %>%
+          mutate(item = "vegetables_wdout_pot") %>%
+          mutate(item_code = paste0(item_code, "*"))
+      ) %>%
+      rbind(
+        NSS68_item_ref %>% filter(item == "vegetables") %>%
+          mutate(item = "vegetables_wdout_pot_oni") %>%
+          mutate(item_code = paste0(item_code, "**"))
+      )
+    
+    ## NSS 68 [2011-12]
+    
+    NSS68_food <- data.frame(
+      NSS68_comp %>%
+        left_join(
+          read.dta13("File Path to per_capita_quantity_food_items_NSS68_Type2.dta")
+        )
+    ) %>%
+      filter(cooking_code != "10") # We exclude those households with no cooking arrangements
+    
+    NSS68_food[is.na(NSS68_food)] <- 0 # There are some households that have 0 of any food items consumption but have a cooking arrangement. These households consume processed food but do not seem to have cooked any food. We put 0 for those values
+    
+    data <- NSS68_food %>%
+      mutate(fdq_hh_size = hh_size) %>%
+      gather(item, quantity_pc, cereal:salt_sugar) %>%
+      filter(item %in% item_l$item) %>%
+      mutate(
+        quantity_afe = (quantity_pc * fdq_hh_size) / hh_size_afe
+      ) %>%
+      left_join(
+        NSS68_item_ref %>% dplyr::select(item, ref_period)
+      ) %>%
+      mutate(
+        quantity_pc_per30day  = (quantity_pc / ref_period) * 30
+      ) %>%
+      mutate(
+        quantity_afe_per30day = (quantity_afe / ref_period) * 30
+      )
+    
+  }
+  
+  return(data)
+  
+} # This function creates the total quantity of food consumed, it includes all households with cooking arrangements.
+
+HCES2023_food <- food_quantity("HCES2023")
+HCES2022_food <- food_quantity("HCES2022")
+NSS68_food <- food_quantity("NSS68") 
+```
+
+Modeling of Food Consumption
+-----------------
+
+This section implements a two-part Bayesian Additive Model (BAM)
+approach to analyze household food consumption patterns across different
+survey years. The implementation consists of two complementary
+functions:
+
+Modeling Consumption Probability
+-----------------
+
+The food_prob() function creates a binomial (logit) model to estimate
+the probability of a household consuming a specific food item. This
+captures the binary decision of whether a household consumes an item or
+not. The function:
+
+1.  Selects the appropriate dataset based on the survey year parameter
+
+    (n) 
+
+2.  Determines whether to use per capita or adult female equivalent
+    (AFE) quantities based on the (a) parameter
+
+3.  Filters data for a specific food item (f) and removes incomplete
+    cases Creates a binary consumption indicator variable (cons)
+    Converts categorical variables to factors for modeling Constructs
+    different model formulas based on food type:
+
+4.  For seasonal items like fresh fruits and vegetables, includes
+    additional random effects for seasonal factors For non-seasonal
+    items, uses a simpler model structure
+
+5.  Fits a BAM using mgcv::bam() with: Quasibinomial family with logit
+    link function fREML method Survey weights (w_pc) Random effects
+    specified via smooth terms (s()) with bs = "re" Memory optimization
+    through chunking and gc() settings
+
+```{r}
+
+food_prob <- function(n,f,a) {
+  
+  if (n == "HCES2023") {
+    d_ana <- HCES2023_food
+  }else if (n == "HCES2022") {
+    d_ana <- HCES2022_food
+  } else if (n == "NSS68") {
+    d_ana <- NSS68_food
+  }
+  
+  if (a == "yes") {
+    d_ana <- d_ana %>% mutate(quantity = quantity_afe_per30day) 
+  } else if (a == "no") {
+    d_ana <- d_ana %>% mutate(quantity = quantity_pc_per30day)
+  }
+  
+  d_ana <- d_ana %>% filter(item == f)
+  
+  d_ana <- d_ana[complete.cases(d_ana),]
+  
+  d_ana <- d_ana %>%
+    mutate(
+      cons = as.integer(ifelse(quantity > 0, 1, 0))
+    ) %>%
+    mutate(
+      nss_region = factor(nss_region),
+      sector = factor(sector),
+      class = factor(class),
+      seasonal = factor(seasonal),
+      psu_final = factor(psu_final)
+    )
+  
+  if (f %in% c("fresh_fruits", "vegetables", "vegetables_wdout_pot_oni") ) {
+    
+    logit_p <- cons ~ 1 +
+      s(nss_region, bs = "re") +
+      s(sector, bs = "re") +
+      s(class, bs = "re") +
+      s(seasonal, bs = "re") +
+      s(nss_region, sector, bs = "re") +
+      s(nss_region, class, bs = "re") +
+      s(nss_region, seasonal, bs = "re") +
+      s(sector, class, bs = "re") +
+      s(sector, seasonal, bs = "re") +
+      s(class, seasonal, bs = "re") 
+    
+  } else {
+    
+    logit_p <- cons ~ 1 +
+      s(nss_region, bs = "re") +
+      s(sector, bs = "re") +
+      s(class, bs = "re") +
+      s(nss_region, sector, bs = "re") +
+      s(nss_region, class, bs = "re") +
+      s(sector, class, bs = "re") 
+    
+  }
+  
+  bam_p <- mgcv::bam(
+    logit_p,
+    data     = d_ana,
+    weights  = d_ana$w_pc,
+    family   = quasibinomial(link = "logit"),
+    method   = "fREML",
+    discrete = TRUE,
+    gamma    = 1.4,
+    gc.level = 2,
+    chunk.size = 2000,
+    file       = paste0("bam_tmp_prob_", n, "_", f)
+  )
+  
+  return(bam_p)
+  
+}
+```
+
+Modeling Consumption Amounts
+-----------------
+
+Simillarly, The food_quant() function creates a Gamma model with
+log-link to estimate the positive quantity consumed, conditional on
+consumption occurring.
+
+```{r}
+
+food_quant <- function(n,f,a) {
+  
+  if (n == "HCES2023") {
+    d_ana <- HCES2023_food
+  } else if (n == "HCES2022") {
+    d_ana <- HCES2022_food
+  } else if (n == "NSS68") {
+    d_ana <- NSS68_food 
+  }
+  
+  if (a == "yes") {
+    d_ana <- d_ana %>% mutate(quantity = quantity_afe_per30day) 
+  } else if (a == "no") {
+    d_ana <- d_ana %>% mutate(quantity = quantity_pc_per30day)
+  }
+  
+  d_ana <- d_ana %>% filter(item == f)
+  
+  d_ana <- d_ana[complete.cases(d_ana),]
+  
+  d_ana <- d_ana %>%
+    mutate(
+      cons = as.integer(ifelse(quantity > 0, 1, 0))
+    ) %>%
+    mutate(
+      nss_region = factor(nss_region),
+      sector = factor(sector),
+      class = factor(class),
+      seasonal = factor(seasonal),
+      psu_final = factor(psu_final)
+    )
+  
+  d_ana_nonzero <- d_ana %>%
+    filter(quantity > 0)
+  
+  if (f %in% c("fruits_fresh", "vegetables", "vegetables_wdout_pot_oni") ) {
+    
+    quant <- quantity ~ 1 +
+      s(nss_region, bs = "re") +
+      s(sector, bs = "re") +
+      s(class, bs = "re") +
+      s(seasonal, bs = "re") +
+      s(nss_region, sector, bs = "re") +
+      s(nss_region, class, bs = "re") +
+      s(nss_region, seasonal, bs = "re") +
+      s(sector, class, bs = "re") +
+      s(sector, seasonal, bs = "re") +
+      s(class, seasonal, bs = "re") 
+    
+  } else {
+    
+    quant <- quantity ~ 1 +
+      s(nss_region, bs = "re") +
+      s(sector, bs = "re") +
+      s(class, bs = "re") +
+      s(nss_region, sector, bs = "re") +
+      s(nss_region, class, bs = "re") +
+      s(sector, class, bs = "re") 
+    
+  }
+  
+  bam_q <- mgcv::bam(
+    quant,
+    data       = d_ana_nonzero,
+    weights    = d_ana_nonzero$w_pc,
+    family     = Gamma(link = "log"),
+    method     = "fREML",
+    discrete   = TRUE,
+    gamma      = 1.4,
+    gc.level   = 2,
+    chunk.size = 2000,
+    file       = paste0("bam_tmp_quant_", n, "_", f)
+  )
+  
+  return(bam_q)
+  
+}
+```
+
+Setup for Parallel Analysis
+-----------------
+
+We create a data frame h_n that defines all combinations of food items
+and analysis type (using adult female equivalent quantities, indicated
+by a = "yes"). This generates a comprehensive list of modeling tasks to
+be executed.
+
+```{r}
+
+h_n <- data.frame(
+  expand.grid(
+    f = item_l$item,
+    a = c("yes"),
+    stringsAsFactors = FALSE
+  )
+) %>%
+  mutate(
+    name = paste0(f, "_", a)
+  )
+
+```
+
+Parallel Execution Framework
+-----------------
+
+1.  For each dataset, a PSOCK cluster with 6 worker nodes is created
+
+2.  Necessary variables and datasets are exported to each worker node
+
+3.   Required packages are loaded in each worker's environment Parallel
+
+4.  The parLapply function distributes model fitting tasks across worker
+    nodes
+
+For each food item, both probability models (food_prob) and quantity
+models (food_quant) are fitted Memory optimization is performed by
+removing model matrices and response vectors after fitting Garbage
+collection is explicitly called to free memory. We save all fitted 
+models and prediction datasets in a single R data file.
+
+
+```{r}
+datasets <- c("NSS68","HCES2022","HCES2023")
+results_logit <- list()
+results_quant <- list()
+
+start_time <- Sys.time()
+for(dat in datasets) {
+  cl <- makeCluster(6)
+  
+  clusterExport(
+    cl,
+    varlist = c(
+      "food_prob",
+      "food_quant",
+      "h_n",
+      "dat",
+      "HCES2023_food",
+      "HCES2022_food",
+      "NSS68_food",
+      "item_l"
+    ),
+    envir = globalenv()
+  )  
+  clusterEvalQ(cl, {
+    library(mgcv)
+    library(dplyr); library(tidyr)   
+  })
+  
+  ## — logit models —
+  models_p <- parLapply(cl, h_n$f, function(f_item) {
+    m <- food_prob(dat, f_item, "yes")
+    m$model <- NULL; m$y <- NULL
+    gc()
+    m
+  })
+  names(models_p) <- paste0(dat, "_", h_n$f, "_yes")
+  results_logit[[dat]] <- models_p
+  
+  ## — quantity models —
+  models_q <- parLapply(cl, h_n$f, function(f_item) {
+    m <- food_quant(dat, f_item, "yes")
+    m$model <- NULL; m$y <- NULL
+    gc()
+    m
+  })
+  names(models_q) <- paste0(dat, "_", h_n$f, "_yes")
+  results_quant[[dat]] <- models_q
+  
+  stopCluster(cl)
+}
+
+
+names(models_q) <- h_n$name
+names(models_p) <- h_n$name
+
+model_quant_NSS68 <- models_q
+model_logit_NSS68 <- models_p
+  
+newdata_NSS68 <- expand.grid(
+  nss_region = factor(unique(NSS68_food$nss_region)),
+  sector     = factor(unique(NSS68_food$sector)),
+  class      = factor(unique(NSS68_food$class)),
+  seasonal   = factor(unique(NSS68_food$seasonal))
+)
+  
+model_quant_HCES2022 <- models_q
+model_logit_HCES2022 <- models_p
+  
+newdata_HCES2022 <- expand.grid(
+  nss_region = factor(unique(HCES2022_food$nss_region)),
+  sector     = factor(unique(HCES2022_food$sector)),
+  class      = factor(unique(HCES2022_food$class)),
+  seasonal   = factor(unique(HCES2022_food$seasonal))
+)
+  
+model_quant_HCES2023 <- models_q
+model_logit_HCES2023 <- models_p
+  
+newdata_HCES2023 <- expand.grid(
+  nss_region = factor(unique(HCES2023_food$nss_region)),
+  sector     = factor(unique(HCES2023_food$sector)),
+  class      = factor(unique(HCES2023_food$class)),
+  seasonal   = factor(unique(HCES2023_food$seasonal))
+)
+
+save(
+  model_logit_NSS68,
+  model_quant_NSS68,
+  model_logit_HCES2022,
+  model_quant_HCES2022,
+  model_logit_HCES2023,
+  model_quant_HCES2023,
+  newdata_NSS68,
+  newdata_HCES2022,
+  newdata_HCES2023,
+  h_n,
+  file = "data_BAM_models_consumption_state_level_part1.RData"
+)
+
+###
+end_time <- Sys.time()
+
+end_time - start_time
+```
+
+2.2 Part 2 of the Analysis for creation of the Clustered SEs BAM models
+==========
+
+In this second phase, we extend our Bayesian Additive Models to compute predictions with clustered standard errors at the PSU level. We re‐use the fitted probability and quantity models from PartI and generate prediction datasets for each survey year (NSS68, HCES2022, HCES2023) incorporating SE estimates.
+
+
+Loading Packages
+-----------------
+
+We use p_load function of pacman package management tool in R. This
+function combines functionalities of both the install.packages and
+library functions. Specifically, p_load checks whether the desired
+packages are already installed; if they are not, it automatically
+installs them.
+
+```{r, results='hide', message=FALSE}
+pacman::p_load(
+tidyverse, tidybayes, readstata13, survey, srvyr, tidytext, data.table, ggtext, scales, ggsci, sandwich, parallel, mgcv, dplyr, tidyr
+)
+```
+
+Specifying Options
+-----------------
+
+We set two global options to handle subsequent computations:
+
+1)  In survey sometimes a primary sampling unit (PSU) may appear alone
+    in a particular stratum; this can complicate the calculation of
+    standard errors and variance. hence we adjust these lonely primary
+    sampling units by survey.lonely.psu = "adjust" argument.
+
+2)  Option scipen = 999 disables scientific notation and forces numbers
+    to be shown in fixed notation.
+
+```{r}
+options(survey.lonely.psu = "adjust")
+options(scipen = 999)
+```
+
+Setting Working Directory
+-----------------
+
+We set project export directory as working directory for BAM data
+exports.
+
+```{r}
+setwd("Path To Working Directory")
+```
+
+Setting up Computation Environment
+-----------------
+
+We enable parallel processing by setting the number of CPU cores to use
+through the mc.cores option, where the detectCores() function from the
+parallel package automatically identifies the maximum number of
+available cores on the system, allowing our computations to leverage
+full processing capacity. Additionally, we establish reproducibility by
+setting a fixed random seed (1234) with set.seed(), ensuring that any
+randomized processes in our analysis will produce identical results when
+the code is run multiple times or on different machines, which is
+essential for scientific reproducibility.
+
+```{r}
+options(mc.cores = parallel::detectCores())
+set.seed(1234) 
+```
+
+Loading Part I Results
+-----------------
+
+Load previously saved BAM model objects and newdata frames:
+
+```{r}
+load("File Path to data_BAM_models_consumption_state_level_part1.RData")
+```
+
+Building Prediction Data with Clustered SEs
+-----------------
+
+This function, d_newdata(n, f, a), takes the survey name (n), a specific food item (f), and an analysis mode (a) to fetch the pre‐fitted logit and Gamma models from Part I, generates predictions on the link scale for both consumption probability and quantity along with their standard errors, and then appends these new columns—clearly labeled with item, AFE flag, and prediction type to the appropriate newdata so that all downstream code can seamlessly use the enhanced dataset for visualization.
+
+```{r}
+
+d_newdata <- function(n,f,a) {
+  
+  if (n == "NSS68") {
+    
+    # Logit of Consuming
+    
+    nm <- paste0(f, "_", a)
+    model_l <- model_logit_NSS68[[nm]]
+    model_q <- model_quant_NSS68[[nm]]
+    data_logit <- model_l$model
+    data_quant <- model_l$model
+    
+    # Compute clustered robust variance-covariance matrix for prob of leisure
+    p <- predict(model_l, newdata = newdata_NSS68, type = "link", se.fit = TRUE)
+    
+    # Predict for the new data for the logit model
+    newdata_NSS68$predicted_lp_logit <- p[[1]]
+    
+    names(newdata_NSS68)[names(newdata_NSS68) == "predicted_lp_logit"] <- paste0(f, "_afe_", a, "_lp_logit")
+    
+    newdata_NSS68$predicted_lp_logit_se <- p[[2]]
+    
+    names(newdata_NSS68)[names(newdata_NSS68) == "predicted_lp_logit_se"] <- paste0(f, "_afe_", a, "_lp_logit_se")
+    
+    ## Total quantity
+    
+    q <- predict(model_q, newdata = newdata_NSS68, type = "link", se.fit = TRUE)
+    
+    # Predict for the new data for the logit model
+    newdata_NSS68$predicted_lp_quant <- q[[1]]
+    
+    names(newdata_NSS68)[names(newdata_NSS68) == "predicted_lp_quant"] <- paste0(f, "_afe_", a, "_lp_quant")
+    
+    # Step : Compute robust prediction standard errors
+    
+    newdata_NSS68$predicted_lp_quant_se <- q[[2]]
+    
+    names(newdata_NSS68)[names(newdata_NSS68) == "predicted_lp_quant_se"] <- paste0(f, "_afe_", a, "_lp_quant_se")
+    
+    newdata <- newdata_NSS68
+    
+  } else if (n == "HCES2022") {
+    
+    # Logit of Consuming
+    
+    nm <- paste0(f, "_", a)
+    model_l <- model_logit_HCES2022[[nm]]
+    model_q <- model_quant_HCES2022[[nm]]
+    data_logit <- model_l$model
+    data_quant <- model_q$model
+    
+    # Compute clustered robust variance-covariance matrix for prob of leisure
+    
+    p <- predict(model_l, newdata = newdata_HCES2022, type = "link", se.fit = TRUE)
+    
+    # Predict for the new data for the logit model
+    newdata_HCES2022$predicted_lp_logit <- p[[1]]
+    
+    names(newdata_HCES2022)[names(newdata_HCES2022) == "predicted_lp_logit"] <- paste0(f, "_afe_", a, "_lp_logit")
+    
+    # Step : Compute robust prediction standard errors
+    
+    newdata_HCES2022$predicted_lp_logit_se <- p[[2]]
+    
+    names(newdata_HCES2022)[names(newdata_HCES2022) == "predicted_lp_logit_se"] <- paste0(f, "_afe_", a, "_lp_logit_se")
+    
+    ## Total quantity
+    
+    # Compute clustered robust variance-covariance matrix for prob of leisure
+    
+    q <- predict(model_q, newdata = newdata_HCES2022, type = "link", se.fit = TRUE)
+    
+    # Predict for the new data for the logit model
+    newdata_HCES2022$predicted_lp_quant <- q[[1]]
+    
+    names(newdata_HCES2022)[names(newdata_HCES2022) == "predicted_lp_quant"] <- paste0(f, "_afe_", a, "_lp_quant")
+    
+    # Step : Compute robust prediction standard errors
+    
+    newdata_HCES2022$predicted_lp_quant_se <- q[[2]]
+    
+    names(newdata_HCES2022)[names(newdata_HCES2022) == "predicted_lp_quant_se"] <- paste0(f, "_afe_", a, "_lp_quant_se")
+    
+    newdata <- newdata_HCES2022
+    
+  } else if (n == "HCES2023") {
+    
+    # Logit of Consuming
+    
+    nm <- paste0(f, "_", a)
+    model_l <- model_logit_HCES2023[[nm]]
+    model_q <- model_quant_HCES2023[[nm]]
+    data_logit <- model_l$model
+    data_quant <- model_q$model
+    
+    # Compute clustered robust variance-covariance matrix for prob of leisure
+    
+    p <- predict(model_l, newdata = newdata_HCES2023, type = "link", se.fit = TRUE)
+    
+    # Predict for the new data for the logit model
+    newdata_HCES2023$predicted_lp_logit <- p[[1]]
+    
+    names(newdata_HCES2023)[names(newdata_HCES2023) == "predicted_lp_logit"] <- paste0(f, "_afe_", a, "_lp_logit")
+    
+    # Step : Compute robust prediction standard errors
+    
+    newdata_HCES2023$predicted_lp_logit_se <- p[[2]]
+    
+    names(newdata_HCES2023)[names(newdata_HCES2023) == "predicted_lp_logit_se"] <- paste0(f, "_afe_", a, "_lp_logit_se")
+    
+    ## Total quantity
+    
+    # Compute clustered robust variance-covariance matrix for prob of leisure
+    
+    q <- predict(model_q, newdata = newdata_HCES2023, type = "link", se.fit = TRUE)
+    
+    # Predict for the new data for the logit model
+    newdata_HCES2023$predicted_lp_quant <- q[[1]]
+    
+    names(newdata_HCES2023)[names(newdata_HCES2023) == "predicted_lp_quant"] <- paste0(f, "_afe_", a, "_lp_quant")
+    
+    # Step : Compute robust prediction standard errors
+    
+    newdata_HCES2023$predicted_lp_quant_se <- q[[2]]
+    
+    names(newdata_HCES2023)[names(newdata_HCES2023) == "predicted_lp_quant_se"] <- paste0(f, "_afe_", a, "_lp_quant_se")
+    
+    newdata <- newdata_HCES2023
+    
+  }
+  
+  return(newdata)
+  
+}
+```
+
+Parallel Execution of Function over All Items
+-----------------
+
+In this step, we apply the d_newdata() function to every food item and analysis mode in our h_n grid simultaneously across six CPU cores. By using mcmapply(..., mc.cores = 6) wrapped in tryCatch(), we ensure that if any individual prediction fails, it’s captured as NULL rather than halting the entire batch. We then remove these NULL entries and combine all of the successful prediction tables into one comprehensive data frame per survey.
+
+```{r}
+# NSS68
+return_list_NSS68 <- do.call(
+  list,
+  mcmapply(
+    function(f,a) {
+      tryCatch(
+        {
+          # Attempt to apply the model_logit function
+          d_newdata("NSS68",f,a)
+        },
+        error = function(e) {
+          # Handle the error (e.g., log the error and return NA or a placeholder)
+          message(sprintf("Error in model_logit for act %s: %s", act, e$message))
+          return(NULL)  # Returning NULL for errored cases
+        }
+      )
+    },
+    f = h_n$f, a = h_n$a,  # Assuming h_n$act is the input list of actions
+    mc.cores = 6,   # Use 6 cores for parallel processing
+    SIMPLIFY = FALSE  # Ensure results remain in list format
+  )
+)
+
+# Filter out NULL results caused by errors
+return_list_NSS68 <- Filter(Negate(is.null), return_list_NSS68)
+
+# Combine all results using Reduce and left_join
+new_data_NSS68_consumption <- Reduce(function(x, y) left_join(x, y, by = c("nss_region", "sector", "class", "seasonal")), return_list_NSS68)
+
+# HCES2022
+return_list_HCES2022 <- do.call(
+  list,
+  mcmapply(
+    function(f,a) {
+      tryCatch(
+        { 
+          # Attempt to apply the model_logit function
+          d_newdata("HCES2022",f,a)
+        },
+        error = function(e) {
+          # Handle the error (e.g., log the error and return NA or a placeholder)
+          message(sprintf("Error in model_logit for act %s: %s", act, e$message))
+          return(NULL)  # Returning NULL for errored cases
+        }
+      )
+    },
+    f = h_n$f, a = h_n$a,  # Assuming h_n$act is the input list of actions
+    mc.cores = 6,   # Use 6 cores for parallel processing
+    SIMPLIFY = FALSE  # Ensure results remain in list format
+  )
+)
+
+# Filter out NULL results caused by errors
+return_list_HCES2022 <- Filter(Negate(is.null), return_list_HCES2022)
+
+# Combine all results using Reduce and left_join
+new_data_HCES2022_consumption <- Reduce(function(x, y) left_join(x, y, by = c("nss_region", "sector", "class", "seasonal")), return_list_HCES2022)
+
+# HCES2023
+return_list_HCES2023 <- do.call(
+  list,
+  mcmapply(
+    function(f,a) {
+      tryCatch(
+        {
+          # Attempt to apply the model_logit function
+          d_newdata("HCES2023",f,a)
+        },
+        error = function(e) {
+          # Handle the error (e.g., log the error and return NA or a placeholder)
+          message(sprintf("Error in model_logit for act %s: %s", act, e$message))
+          return(NULL)  # Returning NULL for errored cases
+        }
+      )
+    },
+    f = h_n$f, a = h_n$a,  # Assuming h_n$act is the input list of actions
+    mc.cores = 6,   # Use 6 cores for parallel processing
+    SIMPLIFY = FALSE  # Ensure results remain in list format
+  )
+)
+
+# Filter out NULL results caused by errors
+return_list_HCES2023 <- Filter(Negate(is.null), return_list_HCES2023)
+
+# Combine all results using Reduce and left_join
+new_data_HCES2023_consumption <- Reduce(function(x, y) left_join(x, y, by = c("nss_region", "sector", "class", "seasonal")), return_list_HCES2023)
+```
+
+Saving the Clustered‐SE Datasets
+-----------------
+Finally, we save the combined prediction datasets by name "data_BAM_models_consumption_state_level_ClusteredSE_part2.RData" in the working directory.
+
+
+```{r}
+save(
+  new_data_NSS68_consumption,
+  new_data_HCES2022_consumption,
+  new_data_HCES2023_consumption,
+  file = "data_BAM_models_consumption_state_level_ClusteredSE_part2.RData"
+)
+```
+
+Chapter 3: Analysis of the Data to compute Micro Nutrient Intake
+==========
+
+3.1 Part I of the Analysis for creation of the BAM models
+==========
+
+We model micro-nutrient intake using a Bayesian Additive Model
+(BAM) implemented via the mgcv R package. In mgcv terminology, BAM is
+simply a generalized additive model (GAM) fitted to large data (Wood et
+al., 2015). In practice our BAM has two parts: a binomial (logit) model
+for the indicator of micro-nutrient intake, and a Gamma (log‑link) model for
+the positive micro-nutient amount.
+
+Loading Packages
+-----------------
+
+We use p_load function of pacman package management tool in R. This
+function combines functionalities of both the install.packages and
+library functions. Specifically, p_load checks whether the desired
+packages are already installed; if they are not, it automatically
+installs them.
+
+```{r, results='hide', message=FALSE}
+pacman::p_load(
+tidybayes, readstata13, survey, srvyr, tidytext, data.table, scales, ggsci, sandwich, parallel, mgcv, dplyr, tidyr
+)
+```
+
+Defining a Custom Operator
+-----------------
+
+A negation of the %in% operator is defined as %notin% using Negate(). This custom operator is useful for filtering values that are not present in a specified vector.
+
+```{r}
+`%notin%` <- Negate(`%in%`)
+```
+
+Specifying Options
+-----------------
+
+We set one global options to handle subsequent computations: In survey sometimes a primary sampling unit (PSU) may appear alone in a particular stratum; this can complicate the calculation of standard errors and variance. hence we adjust these lonely primary sampling units by survey.lonely.psu = "adjust" argument.
+
+```{r}
+options(survey.lonely.psu = "adjust")
+```
+
+Setting Working Directory
+-----------------
+
+We set project export directory as working directory for BAM data
+exports.
+
+```{r}
+setwd("Path To Working Directory")
+```
+
+Setting up Computation Environment
+-----------------
+
+We enable parallel processing by setting the number of CPU cores to use
+through the mc.cores option, where the detectCores() function from the
+parallel package automatically identifies the maximum number of
+available cores on the system, allowing our computations to leverage
+full processing capacity. Additionally, we establish reproducibility by
+setting a fixed random seed (1234) with set.seed(), ensuring that any
+randomized processes in our analysis will produce identical results when
+the code is run multiple times or on different machines, which is
+essential for scientific reproducibility.
+
+```{r}
+options(mc.cores = parallel::detectCores())
+set.seed(1234) 
+```
+
+Load the Relevant Data
+-----------------
+
+```{r}
+load("File Path to full_model/data/data_for_models.RData")
+```
+
+Derive Cooking Arrangement Status
+-----------------
+
+Each dataset is mutated to create a new binary categorical variable, cooking, that distinguishes between households that have a cooking arrangement and those that do not. This classification is based on specific cooking_code values unique to each dataset. These transformations are critical because the subsequent dietary analysis is restricted only to those households that report having some form of cooking arrangement.
+
+```{r}
+NSS68_comp <- NSS68_comp %>%
+  mutate(fdq_hh_size = hh_size) %>%
+  mutate(
+    cooking = dplyr::case_when(
+      cooking_code == "10" ~ "no cooking arrange_ment",
+      .default = "cooking arrangement"
+    )
+  )
+
+HCES2022_comp <- HCES2022_comp %>%
+  mutate(
+    cooking = dplyr::case_when(
+      cooking_code == "12" ~ "no cooking arrange_ment",
+      .default = "cooking arrangement"
+    )
+  )
+
+HCES2023_comp <- HCES2023_comp %>%
+  mutate(
+    cooking = dplyr::case_when(
+      cooking_code == "12" ~ "no cooking arrange_ment",
+      .default = "cooking arrangement"
+    )
+  )
+```
+
+Function to Generate Micronutrient Intake Data
+-----------------
+
+This function, mn_intake(n, mn), plays a central role in the preparation of micronutrient intake data for subsequent modeling. It handles the extraction, transformation, and merging of multiple data sources specific to a given nutrient (mn) and dataset (n which can be NSS68, HCES2022, or HCES2023). The result is a household-level dataset in long format, containing daily micronutrient intake per capita and per AFE.
+
+```{r}
+mn_intake <- function(n, mn) { ... }
+```
+
+1. Load Reference Period for Items
+
+The function begins by reading a Stata .dta file that contains reference periods for each food item. This is necessary because different food items are reported over different recall periods.
+
+```{r}
+item_ref <- data.frame(
+  read.dta13(
+    paste0("File Path to Working Directory", n,"/data/item_code_ref_period.dta")
+  )
+)
+setDT(item_ref)
+```
+
+2. Load Micronutrient List for Dataset
+
+The list of available micronutrients for the selected dataset is read. This list maps food items to the nutrients they provide.
+
+```{r}
+mn_list <- data.frame(
+  read.dta13(
+    paste0("File Path to Working Directory", n,"/data/", n,"_mn_list.dta")
+  )
+)
+setDT(mn_list)
+```
+
+3. Load Core Household Data and Select Variables
+
+The pre-processed household-level dataset corresponding to the dataset n is retrieved using the get() function. Only a subset of relevant variables is retained.
+
+```{r}
+data_comp <- get(paste0(n, "_comp"))
+setDT(data_comp)
+
+data_mn <- data_comp[, .(hhid, cooking_code, psu, psu_final, strata, weights, w, w_pc, 
+                         state_code, sector, seasonal, class_state, fdq_hh_size, hh_size_afe)]
+```
+
+4. Load and Merge Micronutrient Intake Data
+
+Depending on the dataset, the function reads one of two types of files:
+
+- For NSS68, it loads standard nutrient data.
+- For HCES2022 and HCES2023, it loads data with fortification scenarios (e.g., iodized salt).
+
+```{r}
+if (n == "NSS68") {
+  micronutrient_data <- data.frame(
+    read.dta13( "File Path to Working Directory", n,"/data/per_capita_micronutrient_data_", 
+          n, 
+          "_Type2.dta")
+  )
+} else {
+  micronutrient_data <- data.frame(
+    read.dta13("File Path to Working Directory", n,"/data/per_capita_micronutrient_data_", 
+          n, 
+          "_with_fortification_scenarios_includingsalt.dta"")
+  )
+}
+setDT(micronutrient_data)
+```
+
+This dataset is then merged with the data_mn to attach micronutrient values at the household level.
+
+```{r}
+data_mn_merge <- merge(data_mn, micronutrient_data, by = "hhid", all.x = TRUE)
+```
+
+5. Subsetting and Reshaping the Data
+
+A subset of columns, specifically those relevant to the selected micronutrient mn, is extracted and reshaped into long format using the melt() function. This transformation results in one row per household-food item-nutrient combination.
+
+```{r}
+ data_mn_subset <- data_mn_merge[, .SD, .SDcols = c(names(data_mn_merge)[1:14], grep(mn, names(data_mn_merge), value = TRUE))]
+  
+  # Replace NAs with 0
+  data_mn_subset[is.na(data_mn_subset)] <- 0 
+  
+  # Define columns to melt (Example: Matching "iron" in column names)
+  melt_cols <- grep(mn, names(data_mn_subset), value = TRUE)
+```
+
+6. Filter Items Based on Nutrient Contribution
+
+Micronutrient metadata is merged in to identify which food items actually contribute to the selected nutrient. For HCES datasets, only non-fortified food items are retained.
+
+```{r}
+ data_mn_long <- melt(data_mn_subset, 
+                       measure.vars = melt_cols,
+                       variable.name = "item_t", 
+                       value.name = "quantity_pc")
+  
+  # Load and merge micronutrient item data
+  micronutrient_item <- data.frame(
+    read.dta13(
+      paste0("File Path to Working Directory", n,"/data/", n,"_micronutrient_item.dta")
+    )
+  )
+  setDT(micronutrient_item)
+  data_mn_long_m <- merge(data_mn_long, micronutrient_item, by = "item_t", all.x = TRUE)
+  
+  data_mn_long_m <- data_mn_long_m[micronutrient==mn]
+  
+  if (n == "NSS68"){
+    data_mn_long_m <- data_mn_long_m
+  } else {
+    # Filter out fortified items
+    data_mn_long_m <- data_mn_long_m[fortification == "no"]
+  }
+```
+
+7. Merge with Reference Period and Calculate Daily Intake
+
+The reference period is merged into the dataset to enable conversion of monthly or weekly quantities into daily values. Intake is calculated in two ways:
+
+ - value_perday_afe: scaled per AFE
+ - value_perday_pc: scaled per capita
+
+```{r}
+ data_mn_long_merge <- merge(data_mn_long_m, 
+                              item_ref[, .(item, ref_period)], 
+                              by = "item", 
+                              all.x = TRUE)
+  
+  # Compute new columns
+  data_mn_long_merge[, value_perday_afe := ((quantity_pc * fdq_hh_size) / hh_size_afe) / ref_period]
+  data_mn_long_merge[, value_perday_pc := ((quantity_pc * fdq_hh_size) / fdq_hh_size) / ref_period]
+  
+```
+
+8. Return Processed Data
+
+The long-format dataset with computed values is returned as a data frame, ready for modeling.
+
+```{r}
+ data <- as.data.frame(data_mn_long_merge)
+```
+ 
+This completes the intake preparation process for one nutrient in one dataset.
+
+Function to Analyse Micronutrient Intake 
+-----------------
+
+The analysis_mn_intake() function is responsible for carrying out two types of statistical analyses—probability of nutrient intake and quantity of intake—for a specified nutrient (mn) and survey (n). It does this by invoking the mn_intake() function, summarizing nutrient data at the household level, computing dietary diversity (Shannon index), and then fitting appropriate generalized additive models (GAMs).
+
+```{r}
+analysis_mn_intake <- function(n,mn,an) { ... }
+```
+
+1. Prepare Nutrient Intake Data
+
+The function first calls mn_intake() to obtain a cleaned, merged, and reshaped dataset for the specified nutrient and survey.
+
+```{r}
+data_mn <- mn_intake(n, mn)
+```
+
+From the returned dataset, only relevant variables are selected and a series of grouped operations are performed:
+
+- Total daily intake (total_iron) per household is computed as the sum of value_perday_afe        across food items.
+- Share of each food item in total intake is computed.
+- Shannon diversity index is calculated based on item-level shares.
+
+```{r}
+ data_mn <- mn_intake(n,mn) %>%
+    dplyr::select(hhid, item_t, item, micronutrient, value_perday_afe) %>%
+    filter(micronutrient == mn) %>%
+    arrange(hhid, item) %>%
+    group_by(hhid) %>%
+    mutate(
+      total_iron = sum(value_perday_afe)
+    ) %>%
+    mutate(
+      share = ifelse(total_iron > 0, value_perday_afe/total_iron, 0)
+    ) %>%
+    ungroup() %>%
+    group_by(hhid) %>%
+    mutate(
+      v1 = ifelse(share > 0, share*log(share), 0)
+    ) %>%
+    ungroup() %>%
+    group_by(hhid) %>%
+    mutate(
+      shannon_diversity = -1*sum(v1)
+    ) %>%
+    ungroup() %>%
+    dplyr::select(-v1) %>%
+    distinct(hhid, micronutrient, total_iron, shannon_diversity)
+```
+
+2. Merge with Full Household Dataset
+
+The summarized nutrient information is then merged with the full household dataset (*_comp). Only those households with a cooking arrangement are retained.
+
+```{r}
+data_iron <- get(paste0(n, "_comp")) %>%
+  left_join(data_mn) %>%
+  filter(cooking == "cooking arrangement")
+```
+
+3. Prepare Variables for Modeling
+
+Before modeling, factor variables are defined and a binary variable iron is generated, indicating whether the household consumed any of the nutrient (1) or not (0).
+
+```{r}
+data_iron <- data_iron %>%
+    mutate(
+      iron = as.integer(ifelse(total_iron > 0, 1, 0))
+    ) %>%
+    mutate(
+      nss_region = factor(nss_region),
+      sector = factor(sector),
+      class = factor(class),
+      psu_final = factor(psu_final)
+    )
+  
+  if (an == "prob") {...}
+```
+
+4. Model Estimation Based on Analysis Type
+
+Depending on the parameter an, the function branches into one of two modeling approaches:
+
+A. Probability Model (an == "prob")
+
+A quasi-binomial logit model is fitted using mgcv::bam() to model the likelihood of a household consuming the selected nutrient. Random effects are introduced for region, sector, class, and their two-way interactions.
+
+```{r}
+logit_p <- iron ~ 1 +
+      s(nss_region, bs = "re") +
+      s(sector, bs = "re") +
+      s(class, bs = "re") +
+      s(nss_region, sector, bs = "re") +
+      s(nss_region, class, bs = "re") +
+      s(sector, class, bs = "re") 
+    
+    bam_p <- mgcv::bam(
+      logit_p,
+      data=data_iron,
+      weights = data_iron$w_pc,
+      family=quasibinomial(link = "logit"),
+      method = "fREML",
+      discrete = TRUE,  # Enable the discrete method for large (> 100,000) datasets
+      gamma = 1.4, # Penalizes complexity of the model
+      gc.level = 2
+    )
+    
+    bam_p$data_iron
+    
+    return(
+      bam_p
+    )
+```
+
+B. Quantity Model (an == "quantity")
+
+A Gamma log-link model is fit to estimate the amount of nutrient consumed, excluding households with zero intake. The model structure is similar to the probability model.
+
+```{r}
+else if (an == "quantity") {
+    
+    data_iron_nonzero <- data_iron %>% filter(total_iron > 0)
+    
+    quant <- total_iron ~ 1 +
+      s(nss_region, bs = "re") +
+      s(sector, bs = "re") +
+      s(class, bs = "re") +
+      s(nss_region, sector, bs = "re") +
+      s(nss_region, class, bs = "re") +
+      s(sector, class, bs = "re") 
+    
+    bam_q <- mgcv::bam(
+      quant,
+      data = data_iron_nonzero,
+      weights = data_iron_nonzero$w_pc,
+      family=Gamma(link = "log"), 
+      method = "fREML",
+      discrete = TRUE,  # Enable the discrete method for large (> 100,000) datasets
+      gamma = 1.4,
+      gc.level = 2
+    )
+    
+    bam_q$data_analysis <- data_iron
+    
+    return(
+      bam_q
+    )
+    
+  } 
+  
+}
+```
+
+This function thus supports a flexible framework for assessing both the likelihood and intensity of micronutrient consumption across households.
+
+Generation of Nutrient-Survey Grid (h_n)
+-----------------
+
+This section constructs a comprehensive lookup table h_n that serves as the master reference for all nutrient-survey combinations to be analyzed. Each row in this table represents one combination of a household survey (n) and a micronutrient (mn). This structure facilitates automated and parallelized modeling for all required pairs.
+
+1. Creating Cross-Product of Surveys and Nutrients
+
+The expand.grid() function is used to generate every possible combination of:
+
+- Three datasets: NSS68, HCES2022, and HCES2023
+- Eleven micronutrients: vita, vitb1, vitb2, vitb3, vitb6, folate, vitb12, iron, zinc, calcium,   and vitc
+
+```{r}
+h_n <- data.frame(
+  expand.grid(
+    nss = c("NSS68", "HCES2022", "HCES2023"),
+    mn_list = c("vita", "vitb1", "vitb2", "vitb3", "vitb6", "folate", "vitb12", "iron", "zinc", "calcium", "vitc"),
+    stringsAsFactors = FALSE
+  )
+) %>%
+  mutate(names = paste0(nss, "_", mn_list))
+```
+
+2. Explanation of Output Columns
+
+- nss: The name of the survey round (e.g., NSS68 or HCES2022).
+- mn_list: The nutrient to be modeled (e.g., iron, vitb6).
+- names: A concatenated string used to uniquely identify each model output in subsequent steps    (e.g., HCES2023_iron).
+
+This lookup table is subsequently used in mcmapply() loops to drive batch model fitting across all nutrient-survey combinations.
+
+Construction of Prediction Clusters for Modeling Output
+-----------------
+
+To support model-based predictions, this section creates synthetic data grids—one for each dataset—containing all combinations of key categorical variables. These grids will later be used to predict nutrient intake probabilities and quantities under various household profiles.
+
+1. Purpose of Prediction Grids
+
+Each prediction dataset (newdata_NSS68, newdata_HCES2022, newdata_HCES2023) contains every unique combination of:
+
+- nss_region: The NSS (National Sample Survey) regional classification
+- sector: Urban or rural designation
+- class: MPCE-based economic classification (e.g., consumption deciles or quintiles)
+
+These combinations serve as inputs to the predict() function when estimating predicted nutrient intake using the bam models constructed earlier.
+
+2. Explanation
+
+Each prediction grid includes all levels of the three variables across each survey’s dataset. They serve as the foundation for generalized additive model (GAM) predictions, enabling simulation of average intake or likelihood across socio-economic groups and geographical sectors.
+
+```{r}
+
+A. Construction of NSS68 Prediction Grid
+ newdata_NSS68 <- data.frame(
+  expand.grid(
+    nss_region = factor(unique(NSS68_comp$nss_region)),
+    sector = factor(unique(NSS68_comp$sector)),
+    class = factor(unique(NSS68_comp$class))
+  )
+) 
+
+B. Construction of HCES2022 Prediction Grid
+newdata_HCES2022 <- data.frame(
+  expand.grid(
+    nss_region = factor(unique(HCES2022_comp$nss_region)),
+    sector = factor(unique(HCES2022_comp$sector)),
+    class = factor(unique(HCES2022_comp$class))
+  )
+) 
+
+C. Construction of HCES2023 Prediction Grid
+newdata_HCES2023 <- data.frame(
+  expand.grid(
+    nss_region = factor(unique(HCES2023_comp$nss_region)),
+    sector = factor(unique(HCES2023_comp$sector)),
+    class = factor(unique(HCES2023_comp$class))
+  )
+) 
+
+```
+
+Parallelised Model Estimation for All Nutrient-Survey Combinations
+-----------------
+
+This section executes the core modeling engine by estimating both probability and quantity models for each nutrient-survey combination using parallel processing. The mcmapply() function from the parallel package is used to efficiently iterate over all rows of the h_n grid using 6 CPU cores.
+
+1. Probability Model Estimation (bam_p_mn_intake)
+
+A parallelized loop is initiated to fit probability models (an = "prob") for each combination of survey (n) and nutrient (mn) in the h_n table. These models are fit using the previously defined analysis_mn_intake() function.
+
+```{r}
+bam_p_mn_intake <- do.call(
+  list,
+  mcmapply(
+    tryCatch(
+      {
+        function(n,m,an) analysis_mn_intake(n,m,an)
+      },
+      error=function(error_message){
+        message(error_message)
+      }
+    ),
+    n = h_n$nss, m = h_n$mn_list, an = c("prob"), mc.cores = 6, SIMPLIFY = FALSE
+  )
+)
+
+names(bam_p_mn_intake) <-c(h_n$names)
+```
+
+- do.call(list, ...) constructs a list of models.
+- mcmapply() applies the modeling function in parallel across 6 cores.
+- tryCatch() ensures that if any model fails, the process continues without breaking the loop.
+
+The resulting list bam_p_mn_intake contains fitted bam objects, each corresponding to a specific nutrient-survey pair.
+
+2. Quantity Model Estimation (bam_q_mn_intake)
+
+A second parallel loop is executed to estimate the Gamma quantity models (an = "quantity"). The structure mirrors the probability modeling block but targets quantity of micronutrient intake.
+
+```{r}
+bam_q_mn_intake <- do.call(
+  list,
+  mcmapply(
+    tryCatch(
+      {
+        function(n,m,an) analysis_mn_intake(n,m,an)
+      },
+      error=function(error_message){
+        message(error_message)
+      }
+    ),
+    n = h_n$nss, m = h_n$mn_list, an = c("quantity"), mc.cores = 6, SIMPLIFY = FALSE
+  )
+)
+
+names(bam_q_mn_intake) <-c(h_n$names)
+```
+
+This stage produces a parallel list bam_q_mn_intake, where each element contains the estimated model for daily quantity of micronutrient consumption (non-zero cases).
+
+3. Garbage Collection
+
+A call to gc() is issued after each modeling pass to manually invoke garbage collection and free up memory.
+
+```{r}
+gc()
+```
+
+This is especially useful given the large number of GAM models being created in memory.
+
+Saving Model Outputs to File
+-----------------
+
+After all models have been estimated in parallel, the outputs must be stored persistently so that they can be accessed later for analysis, visualization, or reporting. This section performs that task by saving all key model outputs and prediction grids into a single .RData file.
+
+1. Purpose of Saving
+
+Storing the following objects ensures that model computation is not repeated unnecessarily in downstream scripts:
+
+- Prediction cluster datasets (newdata_NSS68, newdata_HCES2022, newdata_HCES2023)
+- Fitted probability models (bam_p_mn_intake)
+- Fitted quantity models (bam_q_mn_intake)
+
+2. Explanation of Parameters
+
+The save() function serializes R objects to disk. The file is saved with a descriptive name that includes "part1", indicating this is the first set of BAM model results. This .RData file acts as a checkpoint for all further steps, allowing researchers to reload precomputed models without running time-consuming estimation again.
+
+```{r}
+save(
+  newdata_NSS68,
+  newdata_HCES2022,
+  newdata_HCES2023,
+  bam_p_mn_intake,
+  bam_q_mn_intake,
+  file = "File Path to data_BAM_models_micronutrient_state_level_part1.RData"
+)
+```
